@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use crate::multiplexer::Multiplexer;
 use crate::connection::Connection;
 use crate::error::Result as AgentResult;
+use tokio::time::timeout;
 
 /// HTTP proxy that converts HTTP requests to protocol messages
 pub struct HttpProxy {
@@ -107,12 +108,22 @@ async fn handle_rpc(
         HttpProxyError::NoResponse
     })?;
 
-    // Wait for response
-    match rx.await {
+    // Wait for response with 60 second timeout
+    // Note: For true streaming SSE, server should send SseEvent messages instead of buffering response
+    let response_result = timeout(
+        tokio::time::Duration::from_secs(60),
+        rx,
+    )
+    .await
+    .map_err(|_| HttpProxyError::NoResponse)?;
+
+    match response_result {
         Ok(Message::HttpResponse(resp)) => {
             // Check if this is an SSE response
             if is_sse_response(&resp.headers) {
                 // For SSE, body will be streamed line-by-line
+                // Note: Current implementation buffers the entire response
+                // For true streaming with very large responses, server should send SseEvent messages
                 let events = resp
                     .body
                     .as_deref()
@@ -186,12 +197,22 @@ async fn handle_http(
         HttpProxyError::NoResponse
     })?;
 
-    // Wait for response
-    match rx.await {
+    // Wait for response with 60 second timeout
+    // Note: For true streaming SSE, server should send SseEvent messages instead of buffering response
+    let response_result = timeout(
+        tokio::time::Duration::from_secs(60),
+        rx,
+    )
+    .await
+    .map_err(|_| HttpProxyError::NoResponse)?;
+
+    match response_result {
         Ok(Message::HttpResponse(resp)) => {
             // Check if this is an SSE response
             if is_sse_response(&resp.headers) {
                 // For SSE, body will be streamed line-by-line
+                // Note: Current implementation buffers the entire response
+                // For true streaming with very large responses, server should send SseEvent messages
                 let events = resp
                     .body
                     .as_deref()
