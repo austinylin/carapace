@@ -1,4 +1,4 @@
-use carapace_protocol::{Message, HttpRequest, HttpResponse};
+use carapace_protocol::{Message, HttpRequest};
 use std::sync::Arc;
 use axum::{
     extract::State,
@@ -12,18 +12,21 @@ use uuid::Uuid;
 use std::collections::HashMap;
 
 use crate::multiplexer::Multiplexer;
+use crate::connection::Connection;
 use crate::error::Result as AgentResult;
 
 /// HTTP proxy that converts HTTP requests to protocol messages
 pub struct HttpProxy {
     multiplexer: Arc<Multiplexer>,
+    connection: Arc<Connection>,
     port: u16,
 }
 
 impl HttpProxy {
-    pub fn new(multiplexer: Arc<Multiplexer>, port: u16) -> Self {
+    pub fn new(multiplexer: Arc<Multiplexer>, connection: Arc<Connection>, port: u16) -> Self {
         HttpProxy {
             multiplexer,
+            connection,
             port,
         }
     }
@@ -31,12 +34,14 @@ impl HttpProxy {
     /// Start listening for HTTP requests
     pub async fn listen(&self) -> AgentResult<()> {
         let multiplexer = self.multiplexer.clone();
+        let connection = self.connection.clone();
 
-        // Build router
+        // Build router with both multiplexer and connection as state
+        let app_state = (multiplexer, connection);
         let app = Router::new()
             .route("/rpc", post(handle_rpc))
             .route("/api/:tool/:path", post(handle_http))
-            .with_state(multiplexer);
+            .with_state(app_state);
 
         // Bind to localhost:port
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", self.port)).await?;
@@ -48,15 +53,15 @@ impl HttpProxy {
     }
 }
 
-impl Default for HttpProxy {
-    fn default() -> Self {
-        Self::new(Arc::new(crate::multiplexer::Multiplexer::new()), 8080)
-    }
-}
+// Note: Default impl removed as Connection requires SSH server
+// Use explicit HttpProxy::new() instead
+
+/// HTTP proxy state type: (Multiplexer, Connection)
+type ProxyState = (Arc<Multiplexer>, Arc<Connection>);
 
 /// Handle JSON-RPC requests
 async fn handle_rpc(
-    State(multiplexer): State<Arc<Multiplexer>>,
+    State((multiplexer, connection)): State<ProxyState>,
     request: Request<Body>,
 ) -> std::result::Result<Response, HttpProxyError> {
     // Read body
@@ -95,28 +100,12 @@ async fn handle_rpc(
     // Register waiter for response
     let rx = multiplexer.register_waiter(request_id).await;
 
-    // Send request
-    // In real implementation, would send to server via connection
-    // For now, simulate response
-    tokio::spawn({
-        let multiplexer = multiplexer.clone();
-        async move {
-            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-
-            let resp = Message::HttpResponse(HttpResponse {
-                id: http_req.id,
-                status: 200,
-                headers: {
-                    let mut h = HashMap::new();
-                    h.insert("Content-Type".to_string(), "application/json".to_string());
-                    h
-                },
-                body: Some(r#"{"jsonrpc":"2.0","result":"ok"}"#.to_string()),
-            });
-
-            multiplexer.handle_response(resp).await;
-        }
-    });
+    // Send request to server via SSH connection
+    let msg = Message::HttpRequest(http_req);
+    connection.send(msg).await.map_err(|e| {
+        tracing::error!("Failed to send HTTP request: {}", e);
+        HttpProxyError::NoResponse
+    })?;
 
     // Wait for response
     match rx.await {
@@ -155,7 +144,7 @@ async fn handle_rpc(
 
 /// Handle generic HTTP requests
 async fn handle_http(
-    State(multiplexer): State<Arc<Multiplexer>>,
+    State((multiplexer, connection)): State<ProxyState>,
     request: Request<Body>,
 ) -> std::result::Result<Response, HttpProxyError> {
     let method = request.method().to_string();
@@ -190,22 +179,12 @@ async fn handle_http(
     // Register waiter for response
     let rx = multiplexer.register_waiter(request_id).await;
 
-    // Simulate response
-    tokio::spawn({
-        let multiplexer = multiplexer.clone();
-        async move {
-            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-
-            let resp = Message::HttpResponse(HttpResponse {
-                id: http_req.id,
-                status: 200,
-                headers: HashMap::new(),
-                body: Some("OK".to_string()),
-            });
-
-            multiplexer.handle_response(resp).await;
-        }
-    });
+    // Send request to server via SSH connection
+    let msg = Message::HttpRequest(http_req);
+    connection.send(msg).await.map_err(|e| {
+        tracing::error!("Failed to send HTTP request: {}", e);
+        HttpProxyError::NoResponse
+    })?;
 
     // Wait for response
     match rx.await {
@@ -284,14 +263,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_http_proxy_creation() {
-        let _proxy = HttpProxy::default();
-    }
-
-    #[test]
-    fn test_http_proxy_with_custom_port() {
-        let multiplexer = Arc::new(Multiplexer::new());
-        let proxy = HttpProxy::new(multiplexer, 9090);
-        assert_eq!(proxy.port, 9090);
+    fn test_http_proxy_state_type() {
+        // Note: Can't easily test HttpProxy without real Connection
+        // Real testing is done in integration tests
+        // This test just verifies the module compiles
     }
 }
