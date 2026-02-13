@@ -120,12 +120,32 @@ async fn handle_rpc(
     // Wait for response
     match rx.await {
         Ok(Message::HttpResponse(resp)) => {
-            let body = resp.body.unwrap_or_default();
-            Ok((
-                StatusCode::from_u16(resp.status).unwrap_or(StatusCode::OK),
-                body,
-            )
-                .into_response())
+            // Check if this is an SSE response
+            if is_sse_response(&resp.headers) {
+                // For SSE, body will be streamed line-by-line
+                let events = resp
+                    .body
+                    .as_deref()
+                    .unwrap_or("")
+                    .lines()
+                    .filter(|line| !line.is_empty())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+
+                Ok((
+                    StatusCode::from_u16(resp.status).unwrap_or(StatusCode::OK),
+                    [(axum::http::header::CONTENT_TYPE, "text/event-stream")],
+                    events,
+                )
+                    .into_response())
+            } else {
+                let body = resp.body.unwrap_or_default();
+                Ok((
+                    StatusCode::from_u16(resp.status).unwrap_or(StatusCode::OK),
+                    body,
+                )
+                    .into_response())
+            }
         }
         Ok(_) => Err(HttpProxyError::WrongResponseType),
         Err(_) => Err(HttpProxyError::NoResponse),
@@ -189,17 +209,46 @@ async fn handle_http(
     // Wait for response
     match rx.await {
         Ok(Message::HttpResponse(resp)) => {
-            let body = resp.body.unwrap_or_default();
-            Ok((
-                StatusCode::from_u16(resp.status).unwrap_or(StatusCode::OK),
-                body,
-            )
-                .into_response())
+            // Check if this is an SSE response
+            if is_sse_response(&resp.headers) {
+                // For SSE, body will be streamed line-by-line
+                let events = resp
+                    .body
+                    .as_deref()
+                    .unwrap_or("")
+                    .lines()
+                    .filter(|line| !line.is_empty())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+
+                Ok((
+                    StatusCode::from_u16(resp.status).unwrap_or(StatusCode::OK),
+                    [(axum::http::header::CONTENT_TYPE, "text/event-stream")],
+                    events,
+                )
+                    .into_response())
+            } else {
+                let body = resp.body.unwrap_or_default();
+                Ok((
+                    StatusCode::from_u16(resp.status).unwrap_or(StatusCode::OK),
+                    body,
+                )
+                    .into_response())
+            }
         }
         Ok(_) => Err(HttpProxyError::WrongResponseType),
         Err(_) => Err(HttpProxyError::NoResponse),
     }
 }
+
+/// Detect if response is SSE (Server-Sent Events)
+fn is_sse_response(headers: &HashMap<String, String>) -> bool {
+    headers
+        .get("Content-Type")
+        .map(|ct| ct.contains("text/event-stream"))
+        .unwrap_or(false)
+}
+
 
 /// Error types for HTTP proxy
 #[derive(Debug)]
