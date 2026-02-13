@@ -1,0 +1,17 @@
+[package]
+name = "carapace-shim"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+carapace-protocol = { path = "../carapace-protocol" }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+anyhow = { workspace = true }
+
+[[bin]]
+name = "carapace-shim"
+path = "src/main.rs"
+
+[dev-dependencies]
+tempfile = { workspace = true }

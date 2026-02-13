@@ -1,0 +1,22 @@
+[package]
+name = "carapace-agent"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+carapace-protocol = { path = "../carapace-protocol" }
+tokio = { workspace = true }
+axum = { workspace = true }
+hyper = { workspace = true }
+tower = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+carapace-protocol = { path = "../carapace-protocol" }

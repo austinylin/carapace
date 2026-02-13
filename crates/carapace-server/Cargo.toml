@@ -1,0 +1,25 @@
+[package]
+name = "carapace-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+carapace-protocol = { path = "../carapace-protocol" }
+carapace-policy = { path = "../carapace-policy" }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+reqwest = { workspace = true }
+hyper = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+chrono = "0.4"
+uuid = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+carapace-protocol = { path = "../carapace-protocol" }
+carapace-policy = { path = "../carapace-policy" }

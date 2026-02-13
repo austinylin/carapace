@@ -1,0 +1,54 @@
+[workspace]
+members = [
+    "crates/carapace-protocol",
+    "crates/carapace-policy",
+    "crates/carapace-agent",
+    "crates/carapace-server",
+    "crates/carapace-shim",
+]
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1.35", features = ["full"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Policy config
+serde_yaml = "0.9"
+
+# HTTP
+axum = "0.7"
+hyper = { version = "1.0", features = ["full"] }
+tower = "0.4"
+reqwest = { version = "0.11", features = ["json", "stream"] }
+
+# Framing
+bytes = "1.5"
+
+# Process execution
+tokio-process = "0.2"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Pattern matching
+glob = "0.3"
+regex = "1.10"
+
+# CLI parsing
+clap = { version = "4.4", features = ["derive"] }
+
+# UUID
+uuid = { version = "1.0", features = ["v4", "serde"] }
+
+# Testing utilities
+tempfile = "3.8"
+proptest = "1.4"
