@@ -1,5 +1,10 @@
 use serde::Serialize;
 use chrono::Utc;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::path::Path;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 /// Structured audit log entry
 #[derive(Debug, Clone, Serialize)]
@@ -19,13 +24,17 @@ pub struct AuditLogEntry {
     pub latency_ms: Option<u64>,
 }
 
-/// Audit logging system with structured JSON output
+/// Audit logging system with structured JSON output and persistence
 pub struct AuditLogger {
     enabled: bool,
     log_argv: bool,
     #[allow(dead_code)]
     log_body: bool,
     redact_patterns: Vec<String>,
+    log_file: Option<String>,
+    max_size_bytes: u64,
+    keep_logs: u32,
+    current_size: Arc<Mutex<u64>>,
 }
 
 impl AuditLogger {
@@ -40,10 +49,21 @@ impl AuditLogger {
                 "--secret".to_string(),
                 "Authorization".to_string(),
             ],
+            log_file: None,
+            max_size_bytes: 100 * 1024 * 1024, // 100MB
+            keep_logs: 10,
+            current_size: Arc::new(Mutex::new(0)),
         }
     }
 
-    pub fn with_config(enabled: bool, log_argv: bool, log_body: bool) -> Self {
+    pub fn with_config(
+        enabled: bool,
+        log_argv: bool,
+        log_body: bool,
+        log_file: Option<String>,
+        max_size_bytes: u64,
+        keep_logs: u32,
+    ) -> Self {
         AuditLogger {
             enabled,
             log_argv,
@@ -54,6 +74,10 @@ impl AuditLogger {
                 "--secret".to_string(),
                 "Authorization".to_string(),
             ],
+            log_file,
+            max_size_bytes,
+            keep_logs,
+            current_size: Arc::new(Mutex::new(0)),
         }
     }
 
@@ -225,11 +249,79 @@ impl AuditLogger {
         result
     }
 
-    /// Emit log entry as structured JSON to stdout/logs
+    /// Emit log entry as structured JSON to stdout/logs and optionally to file
     fn emit_log_entry(&self, entry: &AuditLogEntry) {
         if let Ok(json) = serde_json::to_string(entry) {
+            // Always log to tracing
             tracing::info!("AUDIT: {}", json);
+
+            // Also write to file if configured
+            if let Some(log_file) = &self.log_file {
+                let _ = self.write_to_file(&json, log_file);
+            }
         }
+    }
+
+    /// Write log entry to file with rotation
+    fn write_to_file(&self, json: &str, log_file: &str) -> std::io::Result<()> {
+        let log_entry = format!("{}\n", json);
+        let entry_size = log_entry.len() as u64;
+
+        // Check if we need to rotate
+        let current_size = std::fs::metadata(log_file)
+            .ok()
+            .map(|m| m.len())
+            .unwrap_or(0);
+
+        if current_size + entry_size > self.max_size_bytes {
+            self.rotate_logs(log_file)?;
+        }
+
+        // Append to log file
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log_file)?;
+
+        file.write_all(log_entry.as_bytes())?;
+        Ok(())
+    }
+
+    /// Rotate logs when max size is exceeded
+    fn rotate_logs(&self, log_file: &str) -> std::io::Result<()> {
+        let path = Path::new(log_file);
+
+        // Rotate existing logs: shift .1 → .2, .0 → .1, current → .0
+        for i in (0..self.keep_logs).rev() {
+            let old_name = if i == 0 {
+                log_file.to_string()
+            } else {
+                format!(
+                    "{}.{}",
+                    path.with_extension("").to_string_lossy(),
+                    i
+                )
+            };
+
+            let new_name = format!(
+                "{}.{}",
+                path.with_extension("").to_string_lossy(),
+                i + 1
+            );
+
+            if Path::new(&old_name).exists() {
+                if i + 1 < self.keep_logs {
+                    fs::rename(&old_name, &new_name).ok();
+                } else {
+                    // Delete oldest log
+                    fs::remove_file(&old_name).ok();
+                }
+            }
+        }
+
+        // Clear current log file
+        fs::write(log_file, "")?;
+        Ok(())
     }
 }
 
@@ -269,7 +361,7 @@ mod tests {
 
     #[test]
     fn test_no_redaction_when_disabled() {
-        let logger = AuditLogger::with_config(false, false, false);
+        let logger = AuditLogger::with_config(false, false, false, None, 100 * 1024 * 1024, 10);
 
         // When logging is disabled, we don't log at all
         assert!(!logger.enabled);

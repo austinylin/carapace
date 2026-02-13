@@ -5,6 +5,7 @@ use tokio_util::codec::{FramedRead, FramedWrite};
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::cli_dispatch::CliDispatcher;
+use crate::Result;
 
 /// Listens for incoming messages on SSH tunnel and dispatches them
 pub struct Listener {
@@ -21,7 +22,7 @@ impl Listener {
         &self,
         stdin: R,
         stdout: W,
-    ) -> anyhow::Result<()>
+    ) -> Result<()>
     where
         R: AsyncRead + Unpin,
         W: AsyncWrite + Unpin,

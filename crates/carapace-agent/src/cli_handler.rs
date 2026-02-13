@@ -5,6 +5,7 @@ use tokio::net::{UnixListener, UnixStream};
 use uuid::Uuid;
 
 use crate::multiplexer::Multiplexer;
+use crate::error::Result;
 
 pub struct CliHandler {
     socket_path: String,
@@ -20,7 +21,7 @@ impl CliHandler {
     }
 
     /// Start listening for CLI requests on Unix socket
-    pub async fn listen(&self) -> anyhow::Result<()> {
+    pub async fn listen(&self) -> Result<()> {
         // Remove existing socket if present
         let _ = std::fs::remove_file(&self.socket_path);
 
@@ -42,7 +43,7 @@ impl CliHandler {
     async fn handle_client(
         mut socket: UnixStream,
         multiplexer: Arc<Multiplexer>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
         // Read request from socket

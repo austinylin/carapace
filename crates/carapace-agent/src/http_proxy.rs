@@ -12,6 +12,7 @@ use uuid::Uuid;
 use std::collections::HashMap;
 
 use crate::multiplexer::Multiplexer;
+use crate::error::Result as AgentResult;
 
 /// HTTP proxy that converts HTTP requests to protocol messages
 pub struct HttpProxy {
@@ -28,7 +29,7 @@ impl HttpProxy {
     }
 
     /// Start listening for HTTP requests
-    pub async fn listen(&self) -> anyhow::Result<()> {
+    pub async fn listen(&self) -> AgentResult<()> {
         let multiplexer = self.multiplexer.clone();
 
         // Build router
@@ -57,7 +58,7 @@ impl Default for HttpProxy {
 async fn handle_rpc(
     State(multiplexer): State<Arc<Multiplexer>>,
     request: Request<Body>,
-) -> Result<Response, HttpProxyError> {
+) -> std::result::Result<Response, HttpProxyError> {
     // Read body
     let body_bytes = axum::body::to_bytes(request.into_body(), usize::MAX)
         .await
@@ -156,7 +157,7 @@ async fn handle_rpc(
 async fn handle_http(
     State(multiplexer): State<Arc<Multiplexer>>,
     request: Request<Body>,
-) -> Result<Response, HttpProxyError> {
+) -> std::result::Result<Response, HttpProxyError> {
     let method = request.method().to_string();
     let path = request.uri().path().to_string();
 

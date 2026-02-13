@@ -1,8 +1,8 @@
 use std::sync::Arc;
-use carapace_server::{Listener, CliDispatcher};
+use carapace_server::{Listener, CliDispatcher, Result};
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<()> {
     // Initialize tracing
     tracing_subscriber::fmt()
         .with_env_filter(
