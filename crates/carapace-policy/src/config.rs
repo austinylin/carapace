@@ -52,6 +52,9 @@ pub struct HttpPolicy {
     pub rate_limit: Option<RateLimit>,
 
     #[serde(default)]
+    pub timeout_secs: Option<u64>,
+
+    #[serde(default)]
     pub audit: AuditConfig,
 }
 
