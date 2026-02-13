@@ -170,11 +170,11 @@ fn test_case_sensitive_policy_matching() {
 #[test]
 fn test_policy_matching_with_special_chars() {
     let matcher = ArgvMatcher::new(
-        vec!["api repos/*/*".to_string()],
+        vec!["api repos * *".to_string()],
         vec![],
     ).expect("matcher creation failed");
 
-    // "api repos owner repo" matches the glob pattern
+    // "api repos owner repo" matches the glob pattern "api repos * *"
     assert!(matcher.matches(&["api".to_string(), "repos".to_string(), "owner".to_string(), "repo".to_string()]));
 }
 

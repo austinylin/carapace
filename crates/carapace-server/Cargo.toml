@@ -7,6 +7,7 @@ edition = "2021"
 carapace-protocol = { path = "../carapace-protocol" }
 carapace-policy = { path = "../carapace-policy" }
 tokio = { workspace = true }
+tokio-util = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
@@ -18,6 +19,7 @@ anyhow = { workspace = true }
 thiserror = { workspace = true }
 chrono = "0.4"
 uuid = { workspace = true }
+futures = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

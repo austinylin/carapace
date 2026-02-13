@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 carapace-protocol = { path = "../carapace-protocol" }
+tokio = { workspace = true, features = ["macros", "net"] }
 serde_json = { workspace = true }
 uuid = { workspace = true }
 anyhow = { workspace = true }

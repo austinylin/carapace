@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 carapace-protocol = { path = "../carapace-protocol" }
 tokio = { workspace = true }
+tokio-util = { workspace = true }
 axum = { workspace = true }
 hyper = { workspace = true }
 tower = { workspace = true }
@@ -16,6 +17,7 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
+futures = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

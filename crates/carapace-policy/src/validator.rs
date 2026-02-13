@@ -51,7 +51,7 @@ impl PolicyValidator {
 
     /// Validate that argv doesn't contain shell metacharacters (high-risk)
     pub fn has_dangerous_shell_chars(s: &str) -> bool {
-        const DANGEROUS_CHARS: &[char] = &[';', '|', '&', '$', '`', '(', ')', '<', '>', '\n', '\r'];
+        const DANGEROUS_CHARS: &[char] = &[';', '|', '&', '$', '`', '(', ')', '<', '>', '\n', '\r', '\t'];
         s.chars().any(|c| DANGEROUS_CHARS.contains(&c))
     }
 }
