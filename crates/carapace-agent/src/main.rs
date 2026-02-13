@@ -80,10 +80,36 @@ async fn main() -> AgentResult<()> {
         config.http.port
     );
 
-    // Keep the main task alive
-    tokio::signal::ctrl_c().await?;
-    tracing::info!("Agent shutting down");
+    // Set up signal handlers for graceful shutdown
+    let mut sigterm = tokio::signal::unix::signal(
+        tokio::signal::unix::SignalKind::terminate(),
+    ).map_err(|e| carapace_agent::error::AgentError::IOError(e))?;
 
-    connection.kill().await?;
+    let mut sighup = tokio::signal::unix::signal(
+        tokio::signal::unix::SignalKind::hangup(),
+    ).map_err(|e| carapace_agent::error::AgentError::IOError(e))?;
+
+    // Wait for shutdown signal
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {
+            tracing::info!("Received SIGINT, shutting down");
+        }
+        _ = sigterm.recv() => {
+            tracing::info!("Received SIGTERM, shutting down");
+        }
+        _ = sighup.recv() => {
+            tracing::info!("Received SIGHUP (reload signal) - not implemented yet, continue running");
+            // In future, could reload configuration here
+            // For now, just log and continue
+        }
+    }
+
+    tracing::info!("Agent shutting down gracefully");
+
+    // Clean up resources
+    multiplexer.clear().await;
+    connection.kill().await.ok(); // Ignore errors during shutdown
+
+    tracing::info!("Agent shutdown complete");
     Ok(())
 }
