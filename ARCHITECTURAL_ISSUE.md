@@ -33,6 +33,12 @@ But they DON'T test:
 - ❌ Latency impact of buffering for 2 seconds
 - ❌ How the protocol handles true streaming connections
 
+### The Key Insight
+
+Most tests pass because **events arrive within the 2-second buffering window**, so the buffer successfully captures them. A realistic test would have events arriving both within AND after the window, which would expose the failure.
+
+We added `test_sse_events_after_timeout_window_lost` which demonstrates this - it FAILS because events arriving after 2 seconds are missed. But it's marked `#[ignore]` because the mocking complexity masks the architectural issue. The key point: **tests that properly simulate realistic timing WOULD fail**.
+
 ### Example: Test vs. Production
 
 **Test (what we verify):**

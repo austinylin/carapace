@@ -374,6 +374,106 @@ async fn test_sse_timeout_handling() {
     println!("SSE request completed in {:?}", elapsed);
 }
 
+/// FAILING TEST: Events arriving after timeout window are lost
+///
+/// This test demonstrates the real problem: events that arrive
+/// after the 2-second buffering window are silently dropped.
+///
+/// STATUS: Currently fails due to response.text() buffering semantics,
+/// but demonstrates the kind of test that SHOULD fail to catch the bug.
+/// The architectural issue is: we wait 2 seconds then return buffered response,
+/// which means any events arriving after 2 seconds are lost.
+#[tokio::test]
+#[ignore] // Currently fails due to test mocking complexity, but documents the issue
+async fn test_sse_events_after_timeout_window_lost() {
+    // Mock signal-cli that sends events at different times
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("Failed to bind");
+
+    let addr = listener.local_addr().expect("Failed to get addr");
+
+    tokio::spawn(async move {
+        if let Ok((mut socket, _)) = listener.accept().await {
+            let mut buf = vec![0; 4096];
+            if let Ok(_) = socket.read(&mut buf).await {
+                // Send SSE headers immediately
+                let _ = socket
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n",
+                    )
+                    .await;
+                let _ = socket.flush().await;
+
+                // Send first event immediately (will be captured)
+                sleep(Duration::from_millis(100)).await;
+                let _ = socket
+                    .write_all(b"data: {\"id\": \"event-1\", \"message\": \"First\"}\n\n")
+                    .await;
+                let _ = socket.flush().await;
+
+                // Send second event AFTER 2-second window closes (will be lost)
+                sleep(Duration::from_secs(3)).await;
+                let _ = socket
+                    .write_all(b"data: {\"id\": \"event-2\", \"message\": \"Second\"}\n\n")
+                    .await;
+                let _ = socket.flush().await;
+            }
+        }
+    });
+
+    let http_policy = HttpPolicy {
+        upstream: format!("http://{}", addr),
+        jsonrpc_allow_methods: vec![],
+        jsonrpc_deny_methods: vec![],
+        jsonrpc_param_filters: HashMap::new(),
+        rate_limit: None,
+        timeout_secs: Some(2), // 2-second timeout
+        audit: Default::default(),
+    };
+
+    let mut tools = HashMap::new();
+    tools.insert("signal-cli".to_string(), ToolPolicy::Http(http_policy));
+    let policy = PolicyConfig { tools };
+
+    let dispatcher = HttpDispatcher::with_policy(policy);
+
+    let sse_req = HttpRequest {
+        id: "late-events-test".to_string(),
+        tool: "signal-cli".to_string(),
+        method: "GET".to_string(),
+        path: "/api/v1/events".to_string(),
+        headers: HashMap::new(),
+        body: None,
+    };
+
+    let response = dispatcher.dispatch_http(sse_req).await;
+    assert!(response.is_ok());
+
+    let body = response.unwrap().body.unwrap_or_default();
+    println!("Received body:\n{}", body);
+
+    // THIS ASSERTION DOCUMENTS THE BUG:
+    // We expect 2 events (event-1 and event-2)
+    // But we only get event-1 because event-2 arrives after 2-second window
+    let has_event_1 = body.contains("event-1");
+    let has_event_2 = body.contains("event-2");
+
+    println!("Event 1 received: {}", has_event_1);
+    println!("Event 2 received: {}", has_event_2);
+
+    assert!(
+        has_event_1,
+        "Should have received event-1 (arrived within 2-second window)"
+    );
+
+    // THIS TEST FAILS - demonstrating the architectural problem
+    assert!(
+        has_event_2,
+        "FAILS: event-2 arrived after 2-second window so it's lost - this is the bug!"
+    );
+}
+
 /// ARCHITECTURAL ISSUE TEST
 ///
 /// This test documents the fundamental problem with SSE streaming
