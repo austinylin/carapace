@@ -64,6 +64,9 @@ pub struct HttpPolicy {
     pub jsonrpc_deny_methods: Vec<String>,
 
     #[serde(default)]
+    pub jsonrpc_param_filters: HashMap<String, ParamFilter>,
+
+    #[serde(default)]
     pub rate_limit: Option<RateLimit>,
 
     #[serde(default)]
@@ -71,6 +74,21 @@ pub struct HttpPolicy {
 
     #[serde(default)]
     pub audit: AuditConfig,
+}
+
+/// Filter rules for JSON-RPC params
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParamFilter {
+    /// JSON path to the field to filter (e.g., "recipientNumber")
+    pub field: String,
+
+    /// Glob patterns for allowed values
+    #[serde(default)]
+    pub allow_patterns: Vec<String>,
+
+    /// Glob patterns for denied values
+    #[serde(default)]
+    pub deny_patterns: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

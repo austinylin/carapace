@@ -1,0 +1,39 @@
+tools:
+  signal-cli:
+    type: http
+    upstream: "http://127.0.0.1:18080"
+
+    # Allow only safe read/send operations
+    jsonrpc_allow_methods:
+      - send
+      - receive
+      - listMessages
+      - version
+
+    # Deny dangerous operations
+    jsonrpc_deny_methods:
+      - deleteEverything
+      - removeAccount
+      - unregister
+
+    # Filter on phone numbers (customize for your use case)
+    jsonrpc_param_filters:
+      send:
+        field: "recipientNumber"
+        allow_patterns:
+          - "+1*"              # Allow all US numbers (customize as needed)
+        deny_patterns:
+          - "+15551234567"     # Block specific spam number
+          - "+18005551212"     # Block another number
+
+    rate_limit:
+      max_requests: 100  # Max 100 messages per minute
+      window_secs: 60
+
+    timeout_secs: 30
+
+    audit:
+      enabled: true
+      log_body: false  # Set to true to log full JSON-RPC requests (debug mode)
+      redact_patterns:
+        - "recipientNumber"  # Optionally redact phone numbers in audit logs

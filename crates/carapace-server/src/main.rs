@@ -1,5 +1,5 @@
 use carapace_policy::PolicyConfig;
-use carapace_server::{CliDispatcher, Listener, Result};
+use carapace_server::{CliDispatcher, HttpDispatcher, Listener, Result};
 use clap::Parser;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -39,7 +39,10 @@ async fn main() -> Result<()> {
     );
 
     // Create CLI dispatcher with policy
-    let dispatcher = Arc::new(CliDispatcher::with_policy(policy));
+    let cli_dispatcher = Arc::new(CliDispatcher::with_policy(policy.clone()));
+
+    // Create HTTP dispatcher with policy
+    let http_dispatcher = Arc::new(HttpDispatcher::with_policy(policy));
 
     if let Some(listen_addr) = args.listen {
         // TCP mode: listen on socket and accept multiple connections
@@ -51,11 +54,12 @@ async fn main() -> Result<()> {
             match listener.accept().await {
                 Ok((stream, addr)) => {
                     tracing::info!("New connection from {}", addr);
-                    let dispatcher = dispatcher.clone();
+                    let cli_dispatcher = cli_dispatcher.clone();
+                    let http_dispatcher = http_dispatcher.clone();
 
                     tokio::spawn(async move {
                         let (read, write) = stream.into_split();
-                        let listener = Listener::new(dispatcher);
+                        let listener = Listener::new(cli_dispatcher, http_dispatcher);
 
                         if let Err(e) = listener.listen(read, write).await {
                             tracing::error!("Connection error: {}", e);
@@ -71,7 +75,7 @@ async fn main() -> Result<()> {
     } else {
         // SSH mode: single connection on stdin/stdout
         tracing::info!("Server ready, listening on stdin/stdout");
-        let listener = Listener::new(dispatcher);
+        let listener = Listener::new(cli_dispatcher, http_dispatcher);
         listener
             .listen(tokio::io::stdin(), tokio::io::stdout())
             .await?;

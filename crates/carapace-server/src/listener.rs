@@ -5,16 +5,24 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_util::codec::{FramedRead, FramedWrite};
 
 use crate::cli_dispatch::CliDispatcher;
+use crate::http_dispatch::HttpDispatcher;
 use crate::Result;
 
 /// Listens for incoming messages on SSH tunnel and dispatches them
 pub struct Listener {
-    dispatcher: Arc<CliDispatcher>,
+    cli_dispatcher: Arc<CliDispatcher>,
+    http_dispatcher: Arc<HttpDispatcher>,
 }
 
 impl Listener {
-    pub fn new(dispatcher: Arc<CliDispatcher>) -> Self {
-        Listener { dispatcher }
+    pub fn new(
+        cli_dispatcher: Arc<CliDispatcher>,
+        http_dispatcher: Arc<HttpDispatcher>,
+    ) -> Self {
+        Listener {
+            cli_dispatcher,
+            http_dispatcher,
+        }
     }
 
     /// Start listening for messages (typically on stdin/stdout)
@@ -48,7 +56,7 @@ impl Listener {
     /// Dispatch incoming message to appropriate handler
     async fn dispatch_message(&self, msg: Message) -> Option<Message> {
         match msg {
-            Message::CliRequest(req) => match self.dispatcher.dispatch_cli(req).await {
+            Message::CliRequest(req) => match self.cli_dispatcher.dispatch_cli(req).await {
                 Ok(resp) => Some(Message::CliResponse(resp)),
                 Err(e) => {
                     tracing::error!("CLI dispatch error: {}", e);
@@ -59,13 +67,28 @@ impl Listener {
                     }))
                 }
             },
-            Message::HttpRequest(_req) => {
-                // HTTP dispatch not yet implemented
-                Some(Message::Error(carapace_protocol::ErrorMessage {
-                    id: None,
-                    code: "not_implemented".to_string(),
-                    message: "HTTP dispatch not yet implemented".to_string(),
-                }))
+            Message::HttpRequest(req) => {
+                tracing::info!(
+                    "HTTP request received: {} {} for tool '{}'",
+                    req.method,
+                    req.path,
+                    req.tool
+                );
+
+                match self.http_dispatcher.dispatch_http(req.clone()).await {
+                    Ok(response) => {
+                        tracing::info!("HTTP request {} succeeded with status {}", response.id, response.status);
+                        Some(Message::HttpResponse(response))
+                    }
+                    Err(e) => {
+                        tracing::error!("HTTP dispatch failed: {}", e);
+                        Some(Message::Error(carapace_protocol::ErrorMessage {
+                            id: None,
+                            code: "http_error".to_string(),
+                            message: format!("HTTP dispatch error: {}", e),
+                        }))
+                    }
+                }
             }
             Message::CliResponse(_)
             | Message::Error(_)
@@ -85,7 +108,8 @@ mod tests {
 
     #[test]
     fn test_listener_creation() {
-        let dispatcher = Arc::new(CliDispatcher::new());
-        let _listener = Listener::new(dispatcher);
+        let cli_dispatcher = Arc::new(CliDispatcher::new());
+        let http_dispatcher = Arc::new(HttpDispatcher::new());
+        let _listener = Listener::new(cli_dispatcher, http_dispatcher);
     }
 }

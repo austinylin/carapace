@@ -1,4 +1,7 @@
+use crate::config::ParamFilter;
 use crate::error::PolicyError;
+use glob::Pattern;
+use std::collections::HashMap;
 
 /// Validator for request-specific policy validation
 pub struct PolicyValidator;
@@ -24,6 +27,77 @@ impl PolicyValidator {
                 "Method '{}' is not in allowed methods",
                 method
             )));
+        }
+
+        Ok(())
+    }
+
+    /// Validate JSON-RPC params against policy filters
+    pub fn validate_jsonrpc_params(
+        method: &str,
+        body: &str,
+        filters: &HashMap<String, ParamFilter>,
+    ) -> Result<(), PolicyError> {
+        // Check if this method has param filters
+        if let Some(filter) = filters.get(method) {
+            // Parse JSON body
+            let json: serde_json::Value = serde_json::from_str(body)
+                .map_err(|e| PolicyError::Violation(format!("Invalid JSON: {}", e)))?;
+
+            // Extract params object
+            let params = json.get("params").ok_or_else(|| {
+                PolicyError::Violation("Missing params field in JSON-RPC request".to_string())
+            })?;
+
+            // Extract the field to filter on
+            let field_value = params
+                .get(&filter.field)
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    PolicyError::Violation(format!(
+                        "Missing or invalid field '{}' in params",
+                        filter.field
+                    ))
+                })?;
+
+            // Check deny patterns first (deny-first semantics)
+            for pattern_str in &filter.deny_patterns {
+                let pattern = Pattern::new(pattern_str).map_err(|e| {
+                    PolicyError::Violation(format!("Invalid deny pattern '{}': {}", pattern_str, e))
+                })?;
+
+                if pattern.matches(field_value) {
+                    return Err(PolicyError::Violation(format!(
+                        "Param '{}' value '{}' matches deny pattern '{}'",
+                        filter.field, field_value, pattern_str
+                    )));
+                }
+            }
+
+            // If allow patterns exist, check them (whitelist mode)
+            if !filter.allow_patterns.is_empty() {
+                let mut allowed = false;
+                for pattern_str in &filter.allow_patterns {
+                    let pattern = Pattern::new(pattern_str).map_err(|e| {
+                        PolicyError::Violation(format!(
+                            "Invalid allow pattern '{}': {}",
+                            pattern_str, e
+                        ))
+                    })?;
+
+                    if pattern.matches(field_value) {
+                        allowed = true;
+                        break;
+                    }
+                }
+
+                if !allowed {
+                    return Err(PolicyError::Violation(format!(
+                        "Param '{}' value '{}' not in allow list",
+                        filter.field, field_value
+                    )));
+                }
+            }
         }
 
         Ok(())

@@ -50,10 +50,18 @@ impl HttpDispatcher {
         if let Some(body) = &req.body {
             if let Ok(json) = serde_json::from_str::<serde_json::Value>(body) {
                 if let Some(method) = json.get("method").and_then(|v| v.as_str()) {
+                    // Validate method name
                     PolicyValidator::validate_jsonrpc_method(
                         method,
                         &http_policy.jsonrpc_allow_methods,
                         &http_policy.jsonrpc_deny_methods,
+                    )?;
+
+                    // Validate params (e.g., phone numbers)
+                    PolicyValidator::validate_jsonrpc_params(
+                        method,
+                        body,
+                        &http_policy.jsonrpc_param_filters,
                     )?;
                 }
             }
