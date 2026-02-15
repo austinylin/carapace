@@ -77,7 +77,9 @@ impl Listener {
             }
         });
 
-        // Main loop: read messages and dispatch them
+        // Main loop: read messages and dispatch them concurrently.
+        // Each message is spawned as a separate task so that long-running
+        // dispatches (especially SSE streaming) don't block the message loop.
         while let Some(result) = frame_read.next().await {
             match result {
                 Ok(msg) => {
@@ -111,18 +113,35 @@ impl Listener {
                         }
                     }
 
-                    // Dispatch message, passing SSE channel
-                    if let Some(response) =
-                        self.dispatch_message(msg, Some(sse_event_tx.clone())).await
-                    {
-                        let mut writer = frame_write.lock().await;
-                        if let Err(e) = writer.send(response).await {
-                            tracing::error!("Failed to send response: {}", e);
-                            // Continue processing messages instead of closing connection
-                        } else if let Err(e) = writer.flush().await {
-                            tracing::error!("Failed to flush response: {}", e);
+                    // Spawn dispatch as a separate task so the message loop isn't blocked.
+                    // This is critical: SSE streaming requests block indefinitely, and without
+                    // spawning, they would prevent all other messages from being processed.
+                    let cli_dispatcher = self.cli_dispatcher.clone();
+                    let http_dispatcher = self.http_dispatcher.clone();
+                    let audit_logger = self.audit_logger.clone();
+                    let rate_limiter = self.rate_limiter.clone();
+                    let fw = frame_write.clone();
+                    let sse_tx = sse_event_tx.clone();
+                    tokio::spawn(async move {
+                        let response = Self::dispatch_message_static(
+                            &cli_dispatcher,
+                            &http_dispatcher,
+                            &audit_logger,
+                            &rate_limiter,
+                            msg,
+                            Some(sse_tx),
+                        )
+                        .await;
+
+                        if let Some(response) = response {
+                            let mut writer = fw.lock().await;
+                            if let Err(e) = writer.send(response).await {
+                                tracing::error!("Failed to send response: {}", e);
+                            } else if let Err(e) = writer.flush().await {
+                                tracing::error!("Failed to flush response: {}", e);
+                            }
                         }
-                    }
+                    });
                 }
                 Err(e) => {
                     tracing::error!("Error reading message: {}", e);
@@ -134,18 +153,22 @@ impl Listener {
         Ok(())
     }
 
-    /// Dispatch incoming message to appropriate handler
-    async fn dispatch_message(
-        &self,
+    /// Dispatch incoming message to appropriate handler.
+    /// Static method so it can be called from spawned tasks without borrowing self.
+    async fn dispatch_message_static(
+        cli_dispatcher: &CliDispatcher,
+        http_dispatcher: &HttpDispatcher,
+        audit_logger: &AuditLogger,
+        rate_limiter: &RateLimiter,
         msg: Message,
         sse_event_tx: Option<tokio::sync::mpsc::UnboundedSender<Message>>,
     ) -> Option<Message> {
         match msg {
             Message::CliRequest(req) => {
                 // Rate limit check
-                if let Err(e) = self.rate_limiter.check_request(&req.tool).await {
+                if let Err(e) = rate_limiter.check_request(&req.tool).await {
                     tracing::warn!("Rate limit exceeded for CLI tool '{}': {}", req.tool, e);
-                    self.audit_logger.log_cli_request(
+                    audit_logger.log_cli_request(
                         &req.id,
                         &req.tool,
                         &req.argv,
@@ -160,15 +183,14 @@ impl Listener {
                 }
 
                 // Audit log the request
-                self.audit_logger
-                    .log_cli_request(&req.id, &req.tool, &req.argv, true, None);
+                audit_logger.log_cli_request(&req.id, &req.tool, &req.argv, true, None);
 
                 let start = std::time::Instant::now();
 
-                match self.cli_dispatcher.dispatch_cli(req.clone()).await {
+                match cli_dispatcher.dispatch_cli(req.clone()).await {
                     Ok(resp) => {
                         let latency_ms = start.elapsed().as_millis() as u64;
-                        self.audit_logger.log_cli_response(
+                        audit_logger.log_cli_response(
                             &req.id,
                             resp.exit_code,
                             resp.stdout.len(),
@@ -179,8 +201,7 @@ impl Listener {
                     }
                     Err(e) => {
                         let latency_ms = start.elapsed().as_millis() as u64;
-                        self.audit_logger
-                            .log_cli_response(&req.id, -1, 0, 0, latency_ms);
+                        audit_logger.log_cli_response(&req.id, -1, 0, 0, latency_ms);
                         tracing::error!("CLI dispatch error: {}", e);
                         Some(Message::Error(carapace_protocol::ErrorMessage {
                             id: Some(req.id),
@@ -199,9 +220,9 @@ impl Listener {
                 );
 
                 // Rate limit check
-                if let Err(e) = self.rate_limiter.check_request(&req.tool).await {
+                if let Err(e) = rate_limiter.check_request(&req.tool).await {
                     tracing::warn!("Rate limit exceeded for HTTP tool '{}': {}", req.tool, e);
-                    self.audit_logger.log_http_request(
+                    audit_logger.log_http_request(
                         &req.id,
                         &req.tool,
                         &req.method,
@@ -217,7 +238,7 @@ impl Listener {
                 }
 
                 // Audit log the request
-                self.audit_logger.log_http_request(
+                audit_logger.log_http_request(
                     &req.id,
                     &req.tool,
                     &req.method,
@@ -228,15 +249,13 @@ impl Listener {
 
                 let start = std::time::Instant::now();
 
-                match self
-                    .http_dispatcher
+                match http_dispatcher
                     .dispatch_http(req.clone(), sse_event_tx)
                     .await
                 {
                     Ok(Some(response)) => {
                         let latency_ms = start.elapsed().as_millis() as u64;
-                        self.audit_logger
-                            .log_http_response(&req.id, response.status, latency_ms);
+                        audit_logger.log_http_response(&req.id, response.status, latency_ms);
                         tracing::info!(
                             "HTTP request {} succeeded with status {}",
                             response.id,
@@ -246,15 +265,13 @@ impl Listener {
                     }
                     Ok(None) => {
                         let latency_ms = start.elapsed().as_millis() as u64;
-                        self.audit_logger
-                            .log_http_response(&req.id, 200, latency_ms);
+                        audit_logger.log_http_response(&req.id, 200, latency_ms);
                         tracing::info!("SSE streaming completed for request {}", req.id);
                         None
                     }
                     Err(e) => {
                         let latency_ms = start.elapsed().as_millis() as u64;
-                        self.audit_logger
-                            .log_http_response(&req.id, 500, latency_ms);
+                        audit_logger.log_http_response(&req.id, 500, latency_ms);
                         tracing::error!("HTTP dispatch failed for {}: {}", req.id, e);
                         Some(Message::Error(carapace_protocol::ErrorMessage {
                             id: Some(req.id),
