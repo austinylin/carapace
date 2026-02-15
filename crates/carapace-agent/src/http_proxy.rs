@@ -42,6 +42,7 @@ impl HttpProxy {
         let app = Router::new()
             .route("/rpc", post(handle_rpc))
             .route("/api/:tool/:path", post(handle_http))
+            .fallback(post(handle_fallback)) // Catch-all for other paths like /api/v1/rpc
             .with_state(app_state);
 
         // Bind to localhost:port
@@ -65,6 +66,9 @@ async fn handle_rpc(
     State((multiplexer, connection)): State<ProxyState>,
     request: Request<Body>,
 ) -> std::result::Result<Response, HttpProxyError> {
+    // Extract the original request URI path before reading body
+    let path = request.uri().path().to_string();
+
     // Read body
     let body_bytes = axum::body::to_bytes(request.into_body(), usize::MAX)
         .await
@@ -85,12 +89,12 @@ async fn handle_rpc(
 
     let request_id = Uuid::new_v4().to_string();
 
-    // Create HttpRequest
+    // Create HttpRequest with original path
     let http_req = HttpRequest {
         id: request_id.clone(),
         tool,
         method: "POST".to_string(),
-        path: "/rpc".to_string(),
+        path,
         headers: {
             let mut h = HashMap::new();
             h.insert("Content-Type".to_string(), "application/json".to_string());
@@ -266,6 +270,78 @@ impl IntoResponse for HttpProxyError {
         };
 
         (status, error_message).into_response()
+    }
+}
+
+/// Fallback handler for paths like /api/v1/rpc that aren't explicitly routed
+async fn handle_fallback(
+    State((multiplexer, connection)): State<ProxyState>,
+    request: Request<Body>,
+) -> std::result::Result<Response, HttpProxyError> {
+    // Extract the original request URI path
+    let path = request.uri().path().to_string();
+
+    // Read body
+    let body_bytes = axum::body::to_bytes(request.into_body(), usize::MAX)
+        .await
+        .map_err(|_| HttpProxyError::InvalidBody)?;
+
+    let body_str = String::from_utf8_lossy(&body_bytes).to_string();
+
+    // Parse JSON-RPC to extract tool name from body
+    let json: serde_json::Value =
+        serde_json::from_str(&body_str).map_err(|_| HttpProxyError::MalformedJson)?;
+
+    // Extract tool from JSON body (e.g., {"tool": "signal-cli", ...})
+    let tool = json
+        .get("tool")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown")
+        .to_string();
+
+    let request_id = Uuid::new_v4().to_string();
+    let method = "POST".to_string();
+
+    // Create HttpRequest with tool from body and original path
+    let http_req = HttpRequest {
+        id: request_id.clone(),
+        tool,
+        method,
+        path,
+        headers: {
+            let mut h = HashMap::new();
+            h.insert("Content-Type".to_string(), "application/json".to_string());
+            h
+        },
+        body: Some(body_str),
+    };
+
+    // Register waiter for response
+    let rx = multiplexer.register_waiter(request_id).await;
+
+    // Send request to server via connection
+    let msg = Message::HttpRequest(http_req);
+    connection.send(msg).await.map_err(|e| {
+        tracing::error!("Failed to send HTTP request: {}", e);
+        HttpProxyError::NoResponse
+    })?;
+
+    // Wait for response with 60 second timeout
+    let response_result = timeout(tokio::time::Duration::from_secs(60), rx)
+        .await
+        .map_err(|_| HttpProxyError::NoResponse)?;
+
+    match response_result {
+        Ok(Message::HttpResponse(resp)) => {
+            let body = resp.body.unwrap_or_default();
+            Ok((
+                StatusCode::from_u16(resp.status).unwrap_or(StatusCode::OK),
+                body,
+            )
+                .into_response())
+        }
+        Ok(_) => Err(HttpProxyError::WrongResponseType),
+        Err(_) => Err(HttpProxyError::NoResponse),
     }
 }
 
