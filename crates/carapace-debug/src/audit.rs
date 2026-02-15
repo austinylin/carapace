@@ -6,6 +6,7 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 /// Query audit logs with filtering
+#[allow(clippy::too_many_arguments)]
 pub async fn audit(
     file: &Path,
     tool_filter: Option<String>,

@@ -27,10 +27,10 @@ pub async fn policy(policy_file: &Path, request_json: &str, format: &str) -> Res
     };
 
     // Determine request type and test
-    let result = if let Some(method) = request.get("method").and_then(|v| v.as_str()) {
+    let result = if let Some(_method) = request.get("method").and_then(|v| v.as_str()) {
         // JSON-RPC method validation
         test_jsonrpc_method(&policy, &request)?
-    } else if let Some(argv) = request.get("argv").and_then(|v| v.as_array()) {
+    } else if let Some(_argv) = request.get("argv").and_then(|v| v.as_array()) {
         // CLI validation
         test_cli_argv(&policy, &request)?
     } else {
