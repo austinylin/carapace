@@ -36,12 +36,16 @@ jobs:
       - name: Build shim
         run: cargo build --release --bin carapace-shim --target ${{ matrix.target }}
 
+      - name: Build debug toolkit
+        run: cargo build --release --bin carapace-debug --target ${{ matrix.target }}
+
       - name: Create archive
         run: |
           mkdir -p carapace-${{ matrix.target }}
           cp target/${{ matrix.target }}/release/carapace-server carapace-${{ matrix.target }}/
           cp target/${{ matrix.target }}/release/carapace-agent carapace-${{ matrix.target }}/
           cp target/${{ matrix.target }}/release/carapace-shim carapace-${{ matrix.target }}/
+          cp target/${{ matrix.target }}/release/carapace-debug carapace-${{ matrix.target }}/
           cp README.md carapace-${{ matrix.target }}/
           cp -r examples carapace-${{ matrix.target }}/
           tar czf carapace-${{ matrix.target }}.tar.gz carapace-${{ matrix.target }}
