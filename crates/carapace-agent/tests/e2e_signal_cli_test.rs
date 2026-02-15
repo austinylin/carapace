@@ -174,7 +174,6 @@ async fn start_carapace_server(listener_addr: &str, upstream_url: &str) -> Strin
 }
 
 #[tokio::test]
-#[ignore] // Run with: cargo test --test e2e_signal_cli_test -- --ignored --nocapture
 async fn test_e2e_signal_cli_version() {
     eprintln!("Starting e2e test: signal-cli version check");
 

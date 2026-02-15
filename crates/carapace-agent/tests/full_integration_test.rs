@@ -164,7 +164,6 @@ async fn start_carapace_server(
 }
 
 #[tokio::test]
-#[ignore] // Run with: cargo test --test full_integration_test -- --ignored --nocapture
 async fn test_full_integration_signal_cli() {
     eprintln!("\n=== Starting Full Integration Test ===\n");
 

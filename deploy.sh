@@ -145,10 +145,14 @@ fi
 
 CARAPACE_SERVER="$EXTRACT_DIR/carapace-server"
 CARAPACE_AGENT="$EXTRACT_DIR/carapace-agent"
+CARAPACE_DEBUG="$EXTRACT_DIR/carapace-debug"
 
 echo -e "${GREEN}✓ Binaries ready${NC}"
 echo "  Server: $(ls -lh "$CARAPACE_SERVER" | awk '{print $5}')"
 echo "  Agent:  $(ls -lh "$CARAPACE_AGENT" | awk '{print $5}')"
+if [[ -f "$CARAPACE_DEBUG" ]]; then
+    echo "  Debug:  $(ls -lh "$CARAPACE_DEBUG" | awk '{print $5}')"
+fi
 
 # Verify they're Linux binaries
 echo -e "${YELLOW}Verifying binary formats...${NC}"
@@ -195,6 +199,20 @@ ssh "$HOST" "sudo cp /tmp/carapace-server.new /usr/local/bin/carapace-server && 
             rm /tmp/carapace-server.new" 2>&1 >/dev/null || true
 
 echo -e "${GREEN}✓ Server deployed${NC}"
+
+# Deploy debug toolkit to host (if available)
+if [[ -f "$CARAPACE_DEBUG" ]]; then
+    echo -e "${YELLOW}Deploying debug toolkit to host...${NC}"
+    scp -q "$CARAPACE_DEBUG" "$HOST:/tmp/carapace-debug.new" 2>&1 >/dev/null || true
+
+    ssh "$HOST" "sudo cp /tmp/carapace-debug.new /usr/local/bin/carapace-debug && \
+                sudo chmod 755 /usr/local/bin/carapace-debug && \
+                rm /tmp/carapace-debug.new" 2>&1 >/dev/null || true
+
+    echo -e "${GREEN}✓ Debug toolkit deployed${NC}"
+else
+    echo -e "${YELLOW}⚠ carapace-debug not found in artifacts${NC}"
+fi
 
 # Clean up
 rm -rf "$WORK_DIR" 2>/dev/null || true
@@ -245,6 +263,13 @@ else
     echo -e "${YELLOW}⚠${NC}"
 fi
 
+echo -n "  Debug toolkit installed... "
+if ssh "$HOST" "which carapace-debug >/dev/null 2>&1" 2>&1; then
+    echo -e "${GREEN}✓${NC}"
+else
+    echo -e "${YELLOW}⚠${NC}"
+fi
+
 echo ""
 echo -e "${GREEN}=== Deployment Complete ===${NC}"
 echo ""
@@ -252,6 +277,13 @@ echo -e "${BLUE}Next steps:${NC}"
 echo "  1. Test integration:"
 echo -e "     ${YELLOW}ssh claw@claw.orca-puffin.ts.net 'curl -X POST http://127.0.0.1:8080/api/v1/rpc -H \"Content-Type: application/json\" -d \"{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"id\\\":\\\"test\\\",\\\"method\\\":\\\"version\\\",\\\"params\\\":{}}\"'${NC}"
 echo ""
-echo "  2. View logs if needed:"
+echo "  2. Verify SSE streaming (real-time events):"
+echo -e "     ${YELLOW}ssh austin@austin-ubuntu-desktop.orca-puffin.ts.net 'carapace-debug sse-test --count 5 --interval-ms 100 &'${NC}"
+echo -e "     ${YELLOW}ssh austin@austin-ubuntu-desktop.orca-puffin.ts.net 'carapace-debug sniff --filter SseEvent'${NC}"
+echo ""
+echo "  3. Check health:"
+echo -e "     ${YELLOW}ssh austin@austin-ubuntu-desktop.orca-puffin.ts.net 'carapace-debug health'${NC}"
+echo ""
+echo "  4. View logs if needed:"
 echo -e "     ${YELLOW}ssh austin@austin-ubuntu-desktop.orca-puffin.ts.net 'sudo journalctl -u carapace-server.service -f'${NC}"
 echo -e "     ${YELLOW}ssh claw@claw.orca-puffin.ts.net 'sudo journalctl -u carapace-agent.service -f'${NC}"

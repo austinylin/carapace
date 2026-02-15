@@ -109,6 +109,10 @@ impl Connection {
                 tracing::error!("Failed to send message: {}", e);
                 AgentError::SSHConnectionRefused(format!("Send failed: {}", e))
             })?;
+            writer.flush().await.map_err(|e| {
+                tracing::error!("Failed to flush message: {}", e);
+                AgentError::SSHConnectionRefused(format!("Flush failed: {}", e))
+            })?;
             Ok(())
         } else {
             Err(AgentError::SSHConnectionRefused(

@@ -318,7 +318,6 @@ async fn start_carapace_server(upstream: &str) -> (String, Arc<HttpDispatcher>) 
 }
 
 #[tokio::test]
-#[ignore] // cargo test --test openclaw_integration_test -- --ignored --nocapture
 async fn test_openclaw_send_message() {
     eprintln!("\n=== Test: Send Message (OpenClaw → signal-cli) ===\n");
 
@@ -409,7 +408,6 @@ async fn test_openclaw_send_message() {
 }
 
 #[tokio::test]
-#[ignore] // cargo test --test openclaw_integration_test -- --ignored --nocapture
 async fn test_openclaw_send_typing_indicator() {
     eprintln!("\n=== Test: Send Typing Indicator ===\n");
 
@@ -486,7 +484,6 @@ async fn test_openclaw_send_typing_indicator() {
 }
 
 #[tokio::test]
-#[ignore] // cargo test --test openclaw_integration_test -- --ignored --nocapture
 async fn test_openclaw_receive_events_sse() {
     eprintln!("\n=== Test: Receive Events (SSE Streaming) ===\n");
 
@@ -559,7 +556,6 @@ async fn test_openclaw_receive_events_sse() {
 }
 
 #[tokio::test]
-#[ignore] // cargo test --test openclaw_integration_test -- --ignored --nocapture
 async fn test_openclaw_blocked_number() {
     eprintln!("\n=== Test: Policy - Block Number ===\n");
 
@@ -638,7 +634,6 @@ async fn test_openclaw_blocked_number() {
 }
 
 #[tokio::test]
-#[ignore] // cargo test --test openclaw_integration_test -- --ignored --nocapture
 async fn test_openclaw_concurrent_requests() {
     eprintln!("\n=== Test: Concurrent Requests ===\n");
 
