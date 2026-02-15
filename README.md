@@ -6,6 +6,52 @@ A capability daemon system for secure, policy-based execution of privileged oper
 
 This project is in active development and **NOT production-ready**. While the core architecture and features are functional, this has not been battle-tested in production environments. Use at your own risk.
 
+## Purpose: OpenClaw Use Case
+
+Carapace was built to solve the **OpenClaw** problem:
+
+> How do you run untrusted or potentially compromised code in an isolated VM while still letting it securely access host resources (secrets, APIs, CLIs)?
+
+**The Problem:**
+- You need to run development tools or experimental code on a VM
+- That code needs access to secrets (1Password, API keys, etc.)
+- You can't store credentials on the VM (it's untrusted)
+- You can't give the VM direct access to host resources (too much privilege)
+- You need full audit trail of what the code accessed
+
+**The Solution (Carapace):**
+- Create a **capability-based gateway** between untrusted VM and trusted host
+- Define exactly what operations are allowed via policy (read-only, specific commands)
+- Proxy requests through the gateway with full auditing
+- Credentials stay on the host, never exposed to VM
+
+**Example: 1Password CLI**
+
+Your untrusted VM needs to access secrets:
+
+```
+VM: $ op item list
+    ↓ (intercepted by carapace-shim)
+
+Shim sends: {"tool": "op", "argv": ["item", "list"]}
+    ↓ (over Tailscale encrypted connection)
+
+Server: Validates against policy
+  ✓ "item list*" is in allow_patterns
+  ✗ "item delete" is in deny_patterns
+  ✓ Request allowed
+    ↓
+Server: Executes as host user with credentials
+  $ op item list (with OP_SESSION from env_inject)
+    ↓
+Server: Returns {"exit_code": 0, "stdout": "...items..."}
+    ↓ (back over Tailscale)
+
+VM: Receives list of items
+```
+
+**Result:** The VM process has **zero direct access to credentials** - it can only ask for operations defined in the policy. All operations are audited.
+
 ## Overview
 
 Carapace enables secure remote execution of CLI commands and HTTP requests with:
@@ -56,7 +102,15 @@ cargo build --release
 # - carapace-shim      (tool name resolver)
 ```
 
-### Deployment Example: 1Password CLI
+### Deployment Example: OpenClaw + 1Password
+
+This example shows the OpenClaw use case: An untrusted development VM needs to access 1Password secrets from a trusted host machine.
+
+**Setup:**
+- **Host (trusted)**: Ubuntu machine where 1Password is installed and user is logged in
+- **VM (untrusted)**: Development VM (possibly compromised or low-trust) that needs to run `op` commands
+
+**Goal:** Let the VM run read-only 1Password operations without exposing credentials.
 
 #### 1. Host Setup (Ubuntu)
 
@@ -295,19 +349,34 @@ tools:
 
 ## Security Considerations
 
+### Threat Model: OpenClaw Use Case
+
+Carapace assumes this threat model:
+
+- **Untrusted client machine** (VM): May be compromised, may run untrusted code
+- **Trusted host machine**: Not fully compromised (attacker is unprivileged)
+- **Network path**: Encrypted (Tailscale, VPN, SSH tunnel) - not exposed to internet
+- **Credentials**: Stored **only on host**, never sent to untrusted machines
+
+**Protection goal**: The untrusted VM can access specific resources (1Password, APIs, CLIs) only through policy-enforced capabilities, never directly.
+
 ### What Carapace Protects Against
 
 ✅ **Shell injection**: Message-based protocol prevents `; rm -rf /` attacks
-✅ **Credential exposure**: Policy-based env_inject keeps secrets on host
-✅ **Unauthorized operations**: Deny patterns block destructive commands
-✅ **Audit trail**: All operations logged immutably
+✅ **Credential exposure**: Policy-based env_inject keeps secrets on host, not sent to VM
+✅ **Unauthorized operations**: Deny patterns block destructive commands (e.g., `item create`, `item delete`)
+✅ **Direct access**: VM can't bypass Carapace to access host resources directly
+✅ **Audit trail**: All operations logged immutably with timestamps and policy decisions
+✅ **Network sniffing**: Encrypted by Tailscale/VPN (Carapace assumes secure transport)
 
 ### What Carapace Does NOT Protect Against
 
 ❌ **Compromised host**: If the server machine is fully compromised, attackers can read policies/credentials
-❌ **Network eavesdropping**: Use Tailscale, VPN, or SSH tunnel for network isolation
+❌ **Network eavesdropping**: Requires Tailscale, VPN, or SSH tunnel - raw TCP over internet is **NOT secure**
 ❌ **Privilege escalation**: The server runs with user privileges (configure with `User=` in systemd)
 ❌ **Logic bugs**: This is early-stage software - test thoroughly before production use
+❌ **Resource exhaustion**: Rate limiting is per-tool, but no per-client limits
+❌ **Timing attacks**: If policy evaluation time leaks information, attacker might infer decisions
 
 ### Best Practices
 
