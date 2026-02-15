@@ -2,6 +2,49 @@
 
 This document optimizes Carapace development for Claude Code, capturing project structure, workflows, and best practices discovered through implementation.
 
+## 🚨 CRITICAL DEVELOPMENT RULES (ALWAYS FOLLOW)
+
+**These rules are non-negotiable. Follow them on every task.**
+
+1. **Tests First, Always**
+   - Write tests BEFORE implementing features (TDD)
+   - Write tests to reproduce bugs BEFORE debugging
+   - Integration tests that mirror real-world scenarios are best
+   - Use `#[tokio::test]` for async tests, never use `#[ignore]`
+   - Example: Connection dropping → write test for it → then fix
+
+2. **No Shortcuts Ever**
+   - No hardcoded values, debug code, or temporary hacks
+   - No test files with `#[ignore]` attributes
+   - No random println!() debugging left in code
+   - Do it correctly the first time, even if slower
+
+3. **GitHub First, Deploy Second**
+   - ALWAYS commit and push to GitHub BEFORE deploying
+   - GitHub CI/CD must pass (tests + clippy) before assuming it works
+   - Use `git push origin main` and verify GitHub Actions succeed
+   - THEN deploy using the deploy script
+
+4. **Always Use deploy.sh**
+   - Never manually copy binaries or restart services
+   - Let the deploy script handle: stop services, copy files, restart, verify
+   - Only exception: if you need to test something very specific locally first
+   - Deploy script automatically downloads latest GitHub Actions artifacts
+
+5. **Integration Tests Over Unit Tests**
+   - Unit tests in `mod tests` are good but insufficient
+   - Integration tests in `tests/` directory with real TCP connections are critical
+   - Tests must verify actual system behavior, not mocked behavior
+   - Example: Don't mock connection.rs, use actual TcpListener + TcpStream
+
+**Why these rules exist:**
+- Previous mistakes: deployed broken code, ignored tests, skipped GitHub CI/CD
+- Complex project with security implications → no room for shortcuts
+- Tests catch integration bugs unit tests miss (like TCP framing)
+- CI/CD catches linting issues local checks miss (like clippy with --all-targets)
+
+---
+
 ## Quick Navigation
 
 ### Project Structure
