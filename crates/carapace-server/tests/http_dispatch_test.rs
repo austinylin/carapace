@@ -1,5 +1,5 @@
-use carapace_protocol::{HttpRequest, HttpResponse};
 use carapace_policy::PolicyValidator;
+use carapace_protocol::{HttpRequest, HttpResponse};
 use std::collections::HashMap;
 
 #[test]
@@ -106,9 +106,18 @@ fn test_rate_limiting_structure() {
     }
 
     let limits = vec![
-        RateLimit { max_requests: 10, window_secs: 60 },
-        RateLimit { max_requests: 100, window_secs: 3600 },
-        RateLimit { max_requests: 0, window_secs: 1 }, // 0 = no requests allowed
+        RateLimit {
+            max_requests: 10,
+            window_secs: 60,
+        },
+        RateLimit {
+            max_requests: 100,
+            window_secs: 3600,
+        },
+        RateLimit {
+            max_requests: 0,
+            window_secs: 1,
+        }, // 0 = no requests allowed
     ];
 
     assert_eq!(limits[0].max_requests, 10);
@@ -152,8 +161,7 @@ fn test_json_rpc_null_method() {
     let json: serde_json::Value = serde_json::from_str(body).unwrap();
 
     // Null method should be rejected
-    let method = json.get("method")
-        .and_then(|m| m.as_str());
+    let method = json.get("method").and_then(|m| m.as_str());
 
     assert!(method.is_none());
 }
@@ -205,7 +213,10 @@ fn test_response_body_encoding() {
         status: 200,
         headers: {
             let mut h = HashMap::new();
-            h.insert("Content-Type".to_string(), "application/json; charset=utf-8".to_string());
+            h.insert(
+                "Content-Type".to_string(),
+                "application/json; charset=utf-8".to_string(),
+            );
             h
         },
         body: Some(r#"{"status":"ok","message":"你好"}"#.to_string()),

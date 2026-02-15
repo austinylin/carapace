@@ -1,4 +1,4 @@
-use carapace_protocol::{Message, HttpRequest, HttpResponse};
+use carapace_protocol::{HttpRequest, HttpResponse, Message};
 use std::collections::HashMap;
 
 #[test]
@@ -115,7 +115,9 @@ fn test_sse_response_detection() {
         body: None, // SSE uses streaming
     };
 
-    let is_sse = resp.headers.get("Content-Type")
+    let is_sse = resp
+        .headers
+        .get("Content-Type")
         .map(|ct: &String| ct.contains("event-stream"))
         .unwrap_or(false);
 
@@ -215,7 +217,10 @@ fn test_response_headers_preservation() {
     };
 
     assert_eq!(resp.headers.len(), 3);
-    assert_eq!(resp.headers.get("X-Custom-Header"), Some(&"value".to_string()));
+    assert_eq!(
+        resp.headers.get("X-Custom-Header"),
+        Some(&"value".to_string())
+    );
 }
 
 #[test]

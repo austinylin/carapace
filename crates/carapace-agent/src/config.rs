@@ -110,8 +110,7 @@ impl AgentConfig {
                 max_body_size: 100 * 1024 * 1024, // 100MB
             },
             logging: LoggingConfig {
-                level: std::env::var("CARAPACE_LOG_LEVEL")
-                    .unwrap_or_else(|_| "info".to_string()),
+                level: std::env::var("CARAPACE_LOG_LEVEL").unwrap_or_else(|_| "info".to_string()),
                 log_file: std::env::var("CARAPACE_LOG_FILE").ok(),
                 json: std::env::var("CARAPACE_LOG_JSON")
                     .ok()

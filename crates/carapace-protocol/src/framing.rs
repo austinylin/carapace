@@ -1,7 +1,7 @@
-use bytes::{Buf, BufMut, BytesMut};
-use tokio_util::codec::{Decoder, Encoder};
 use crate::messages::Message;
+use bytes::{Buf, BufMut, BytesMut};
 use std::io;
+use tokio_util::codec::{Decoder, Encoder};
 
 /// Maximum frame size: 100 MB (prevents DoS from giant messages)
 const MAX_FRAME_SIZE: u32 = 100 * 1024 * 1024;
@@ -93,9 +93,14 @@ mod tests {
         let msg = create_cli_request("test-001");
 
         let mut buffer = BytesMut::new();
-        codec.encode(msg.clone(), &mut buffer).expect("encode failed");
+        codec
+            .encode(msg.clone(), &mut buffer)
+            .expect("encode failed");
 
-        let decoded = codec.decode(&mut buffer).expect("decode failed").expect("no message");
+        let decoded = codec
+            .decode(&mut buffer)
+            .expect("decode failed")
+            .expect("no message");
 
         match (&msg, &decoded) {
             (Message::CliRequest(orig), Message::CliRequest(dec)) => {
@@ -153,9 +158,14 @@ mod tests {
             });
 
             let mut buffer = BytesMut::new();
-            codec.encode(msg.clone(), &mut buffer).expect("encode failed");
+            codec
+                .encode(msg.clone(), &mut buffer)
+                .expect("encode failed");
 
-            let decoded = codec.decode(&mut buffer).expect("decode failed").expect("no message");
+            let decoded = codec
+                .decode(&mut buffer)
+                .expect("decode failed")
+                .expect("no message");
             assert!(matches!(decoded, Message::CliRequest(_)));
         }
     }
@@ -200,7 +210,10 @@ mod tests {
         let mut codec = MessageCodec;
         let result = codec.decode(&mut buffer);
 
-        assert!(result.is_err(), "Should reject frames larger than MAX_FRAME_SIZE");
+        assert!(
+            result.is_err(),
+            "Should reject frames larger than MAX_FRAME_SIZE"
+        );
     }
 
     #[test]
@@ -227,7 +240,10 @@ mod tests {
         let result = codec.decode(&mut buffer);
 
         // Should fail because empty JSON isn't valid
-        assert!(result.is_err(), "Zero-length payload should fail to deserialize");
+        assert!(
+            result.is_err(),
+            "Zero-length payload should fail to deserialize"
+        );
     }
 
     #[test]
@@ -242,11 +258,17 @@ mod tests {
         codec.encode(msg2, &mut buffer).expect("encode 2 failed");
 
         // Decode first
-        let decoded1 = codec.decode(&mut buffer).expect("decode 1 failed").expect("no message 1");
+        let decoded1 = codec
+            .decode(&mut buffer)
+            .expect("decode 1 failed")
+            .expect("no message 1");
         assert!(matches!(decoded1, Message::CliRequest(ref r) if r.id == "first"));
 
         // Decode second
-        let decoded2 = codec.decode(&mut buffer).expect("decode 2 failed").expect("no message 2");
+        let decoded2 = codec
+            .decode(&mut buffer)
+            .expect("decode 2 failed")
+            .expect("no message 2");
         assert!(matches!(decoded2, Message::CliRequest(ref r) if r.id == "second"));
 
         // Buffer should be empty now
@@ -295,17 +317,22 @@ mod tests {
 
         for msg in messages {
             let mut buffer = BytesMut::new();
-            codec.encode(msg.clone(), &mut buffer).expect("encode failed");
+            codec
+                .encode(msg.clone(), &mut buffer)
+                .expect("encode failed");
 
-            let decoded = codec.decode(&mut buffer).expect("decode failed").expect("no message");
+            let decoded = codec
+                .decode(&mut buffer)
+                .expect("decode failed")
+                .expect("no message");
 
             // Just verify it decoded to the same type
             match (&msg, &decoded) {
-                (Message::CliRequest(_), Message::CliRequest(_)) => {},
-                (Message::CliResponse(_), Message::CliResponse(_)) => {},
-                (Message::HttpRequest(_), Message::HttpRequest(_)) => {},
-                (Message::HttpResponse(_), Message::HttpResponse(_)) => {},
-                (Message::Error(_), Message::Error(_)) => {},
+                (Message::CliRequest(_), Message::CliRequest(_)) => {}
+                (Message::CliResponse(_), Message::CliResponse(_)) => {}
+                (Message::HttpRequest(_), Message::HttpRequest(_)) => {}
+                (Message::HttpResponse(_), Message::HttpResponse(_)) => {}
+                (Message::Error(_), Message::Error(_)) => {}
                 _ => panic!("Type mismatch"),
             }
         }
@@ -346,13 +373,13 @@ mod tests {
                 Ok(Some(_)) => {
                     // This is fine if the truncation point happened to be valid
                     // (unlikely but possible for very short messages)
-                },
+                }
                 Ok(None) => {
                     // This is expected - incomplete frame
-                },
+                }
                 Err(_) => {
                     // This is also fine - invalid data
-                },
+                }
             }
         }
     }

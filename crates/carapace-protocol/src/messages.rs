@@ -138,7 +138,8 @@ mod tests {
         };
 
         let json = serde_json::to_string(&resp).expect("serialization failed");
-        let deserialized: CliResponse = serde_json::from_str(&json).expect("deserialization failed");
+        let deserialized: CliResponse =
+            serde_json::from_str(&json).expect("deserialization failed");
 
         assert_eq!(deserialized.exit_code, 0);
         assert_eq!(deserialized.stdout, "response".to_string());
@@ -159,7 +160,8 @@ mod tests {
         };
 
         let json = serde_json::to_string(&req).expect("serialization failed");
-        let deserialized: HttpRequest = serde_json::from_str(&json).expect("deserialization failed");
+        let deserialized: HttpRequest =
+            serde_json::from_str(&json).expect("deserialization failed");
 
         assert_eq!(deserialized.method, "POST");
         assert_eq!(deserialized.body.is_some(), true);
@@ -220,7 +222,8 @@ mod tests {
         };
 
         let json = serde_json::to_string(&resp).expect("serialization failed");
-        let deserialized: CliResponse = serde_json::from_str(&json).expect("deserialization failed");
+        let deserialized: CliResponse =
+            serde_json::from_str(&json).expect("deserialization failed");
 
         assert_eq!(deserialized.stdout.len(), 1024 * 1024);
     }
@@ -257,19 +260,22 @@ mod tests {
         };
 
         let json = serde_json::to_string(&resp).expect("serialization failed");
-        let deserialized: CliResponse = serde_json::from_str(&json).expect("deserialization failed");
+        let deserialized: CliResponse =
+            serde_json::from_str(&json).expect("deserialization failed");
 
         assert_eq!(deserialized.exit_code, -1);
     }
 
     #[test]
     fn test_missing_optional_fields() {
-        let json_no_stdin = r#"{"type":"cli_request","id":"test","tool":"gh","argv":[],"env":{},"cwd":"/"}"#;
+        let json_no_stdin =
+            r#"{"type":"cli_request","id":"test","tool":"gh","argv":[],"env":{},"cwd":"/"}"#;
         let req: CliRequest = serde_json::from_str(json_no_stdin).expect("deserialization failed");
         assert_eq!(req.stdin, None);
 
         let json_no_body = r#"{"type":"http_request","id":"test","tool":"signal-cli","method":"GET","path":"/","headers":{}}"#;
-        let http_req: HttpRequest = serde_json::from_str(json_no_body).expect("deserialization failed");
+        let http_req: HttpRequest =
+            serde_json::from_str(json_no_body).expect("deserialization failed");
         assert_eq!(http_req.body, None);
     }
 

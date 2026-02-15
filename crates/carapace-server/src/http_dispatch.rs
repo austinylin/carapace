@@ -1,7 +1,7 @@
+use carapace_policy::{HttpPolicy, PolicyConfig, PolicyValidator};
 use carapace_protocol::{HttpRequest, HttpResponse};
-use carapace_policy::{PolicyConfig, PolicyValidator, HttpPolicy};
-use std::collections::HashMap;
 use reqwest::Client;
+use std::collections::HashMap;
 
 /// HTTP request dispatcher with policy enforcement
 pub struct HttpDispatcher {
@@ -123,12 +123,7 @@ impl HttpDispatcher {
         let headers: HashMap<String, String> = response
             .headers()
             .iter()
-            .map(|(k, v)| {
-                (
-                    k.to_string(),
-                    v.to_str().unwrap_or("").to_string(),
-                )
-            })
+            .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
             .collect();
 
         let body = response.text().await.ok();

@@ -1,7 +1,9 @@
-pub mod messages;
-pub mod framing;
 pub mod error;
+pub mod framing;
+pub mod messages;
 
-pub use messages::{Message, CliRequest, CliResponse, HttpRequest, HttpResponse, SseEvent, ErrorMessage};
-pub use framing::{MessageCodec, FrameError};
 pub use error::ProtocolError;
+pub use framing::{FrameError, MessageCodec};
+pub use messages::{
+    CliRequest, CliResponse, ErrorMessage, HttpRequest, HttpResponse, Message, SseEvent,
+};

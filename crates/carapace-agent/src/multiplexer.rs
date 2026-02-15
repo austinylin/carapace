@@ -1,7 +1,7 @@
 use carapace_protocol::Message;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{Mutex, oneshot};
+use tokio::sync::{oneshot, Mutex};
 
 pub type ResponseWaiter = oneshot::Sender<Message>;
 

@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::sync::RwLock;
 
-use crate::error::{ServerError, Result};
+use crate::error::{Result, ServerError};
 
 /// Rate limit tracking for a single tool
 #[derive(Debug, Clone)]
@@ -86,11 +86,9 @@ impl RateLimiter {
     pub async fn check_request(&self, tool: &str) -> Result<()> {
         let mut windows = self.windows.write().await;
 
-        let window = windows
-            .entry(tool.to_string())
-            .or_insert_with(|| {
-                RateLimitWindow::new(self.default_max_requests, self.default_window_secs)
-            });
+        let window = windows.entry(tool.to_string()).or_insert_with(|| {
+            RateLimitWindow::new(self.default_max_requests, self.default_window_secs)
+        });
 
         if window.check_and_increment() {
             Ok(())
@@ -104,7 +102,9 @@ impl RateLimiter {
     /// Get current window stats for tool
     pub async fn get_stats(&self, tool: &str) -> Option<(u32, u32, u64)> {
         let windows = self.windows.read().await;
-        windows.get(tool).map(|w| (w.requests, w.max_requests, w.window_secs))
+        windows
+            .get(tool)
+            .map(|w| (w.requests, w.max_requests, w.window_secs))
     }
 
     /// Reset all limits

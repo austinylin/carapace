@@ -1,22 +1,18 @@
-use carapace_policy::{PolicyConfig, ToolPolicy, CliPolicy, ArgvMatcher};
+use carapace_policy::{ArgvMatcher, CliPolicy, PolicyConfig, ToolPolicy};
 use std::collections::HashMap;
 
 #[test]
 fn test_allowed_cli_command() {
-    let matcher = ArgvMatcher::new(
-        vec!["pr list*".to_string()],
-        vec![],
-    ).expect("matcher creation failed");
+    let matcher =
+        ArgvMatcher::new(vec!["pr list*".to_string()], vec![]).expect("matcher creation failed");
 
     assert!(matcher.matches(&["pr".to_string(), "list".to_string()]));
 }
 
 #[test]
 fn test_denied_cli_command() {
-    let matcher = ArgvMatcher::new(
-        vec!["pr list".to_string()],
-        vec![],
-    ).expect("matcher creation failed");
+    let matcher =
+        ArgvMatcher::new(vec!["pr list".to_string()], vec![]).expect("matcher creation failed");
 
     assert!(!matcher.matches(&["pr".to_string(), "delete".to_string()]));
 }
@@ -25,12 +21,17 @@ fn test_denied_cli_command() {
 fn test_deny_pattern_blocks_allowed_pattern() {
     // Deny takes precedence even if command matches allow pattern
     let matcher = ArgvMatcher::new(
-        vec!["*".to_string()], // Allow all
+        vec!["*".to_string()],              // Allow all
         vec!["* --password *".to_string()], // But deny with --password
-    ).expect("matcher creation failed");
+    )
+    .expect("matcher creation failed");
 
     assert!(matcher.matches(&["safe".to_string(), "command".to_string()]));
-    assert!(!matcher.matches(&["bad".to_string(), "--password".to_string(), "secret".to_string()]));
+    assert!(!matcher.matches(&[
+        "bad".to_string(),
+        "--password".to_string(),
+        "secret".to_string()
+    ]));
 }
 
 #[test]
@@ -70,7 +71,8 @@ fn test_policy_multiple_allow_patterns() {
             "api repos/*/*".to_string(),
         ],
         vec![],
-    ).expect("matcher creation failed");
+    )
+    .expect("matcher creation failed");
 
     assert!(matcher.matches(&["pr".to_string(), "list".to_string()]));
     assert!(matcher.matches(&["issue".to_string(), "view".to_string(), "123".to_string()]));
@@ -79,10 +81,8 @@ fn test_policy_multiple_allow_patterns() {
 
 #[test]
 fn test_default_deny_policy() {
-    let matcher = ArgvMatcher::new(
-        vec!["pr list".to_string()],
-        vec![],
-    ).expect("matcher creation failed");
+    let matcher =
+        ArgvMatcher::new(vec!["pr list".to_string()], vec![]).expect("matcher creation failed");
 
     // Only "pr list" is allowed, everything else denied
     assert!(matcher.matches(&["pr".to_string(), "list".to_string()]));
@@ -95,7 +95,8 @@ fn test_policy_with_whitespace_handling() {
     let matcher = ArgvMatcher::new(
         vec!["safe   command".to_string()], // Multiple spaces in pattern
         vec![],
-    ).expect("matcher creation failed");
+    )
+    .expect("matcher creation failed");
 
     // argv joined by single space won't match multiple spaces in pattern
     let result = matcher.matches(&["safe".to_string(), "command".to_string()]);
@@ -116,7 +117,8 @@ fn test_policy_enforcement_readonly_tools() {
             "* remove *".to_string(),
             "* rm *".to_string(),
         ],
-    ).expect("matcher creation failed");
+    )
+    .expect("matcher creation failed");
 
     assert!(matcher.matches(&["list".to_string()]));
     assert!(matcher.matches(&["view".to_string(), "file".to_string()]));
@@ -126,15 +128,14 @@ fn test_policy_enforcement_readonly_tools() {
 #[test]
 fn test_policy_per_tool_different_rules() {
     // Different tools should have different policies
-    let gh_matcher = ArgvMatcher::new(
-        vec!["pr *".to_string(), "issue *".to_string()],
-        vec![],
-    ).expect("gh matcher failed");
+    let gh_matcher = ArgvMatcher::new(vec!["pr *".to_string(), "issue *".to_string()], vec![])
+        .expect("gh matcher failed");
 
     let op_matcher = ArgvMatcher::new(
         vec!["read op://*".to_string()],
         vec!["* --share *".to_string()],
-    ).expect("op matcher failed");
+    )
+    .expect("op matcher failed");
 
     // gh allows "pr list"
     assert!(gh_matcher.matches(&["pr".to_string(), "list".to_string()]));
@@ -149,7 +150,8 @@ fn test_policy_deny_all() {
     let matcher = ArgvMatcher::new(
         vec![], // No allowed patterns
         vec![],
-    ).expect("matcher creation failed");
+    )
+    .expect("matcher creation failed");
 
     // With no allowed patterns, everything is denied
     assert!(!matcher.matches(&["anything".to_string()]));
@@ -157,10 +159,8 @@ fn test_policy_deny_all() {
 
 #[test]
 fn test_case_sensitive_policy_matching() {
-    let matcher = ArgvMatcher::new(
-        vec!["PR list".to_string()],
-        vec![],
-    ).expect("matcher creation failed");
+    let matcher =
+        ArgvMatcher::new(vec!["PR list".to_string()], vec![]).expect("matcher creation failed");
 
     // Glob patterns are case-sensitive
     assert!(matcher.matches(&["PR".to_string(), "list".to_string()]));
@@ -169,13 +169,16 @@ fn test_case_sensitive_policy_matching() {
 
 #[test]
 fn test_policy_matching_with_special_chars() {
-    let matcher = ArgvMatcher::new(
-        vec!["api repos * *".to_string()],
-        vec![],
-    ).expect("matcher creation failed");
+    let matcher = ArgvMatcher::new(vec!["api repos * *".to_string()], vec![])
+        .expect("matcher creation failed");
 
     // "api repos owner repo" matches the glob pattern "api repos * *"
-    assert!(matcher.matches(&["api".to_string(), "repos".to_string(), "owner".to_string(), "repo".to_string()]));
+    assert!(matcher.matches(&[
+        "api".to_string(),
+        "repos".to_string(),
+        "owner".to_string(),
+        "repo".to_string()
+    ]));
 }
 
 #[test]

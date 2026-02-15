@@ -1,7 +1,7 @@
-use std::sync::Arc;
-use carapace_server::{Listener, CliDispatcher, Result};
 use carapace_policy::PolicyConfig;
+use carapace_server::{CliDispatcher, Listener, Result};
 use clap::Parser;
+use std::sync::Arc;
 use tokio::net::TcpListener;
 
 #[derive(Parser, Debug)]
@@ -33,7 +33,10 @@ async fn main() -> Result<()> {
     tracing::info!("Loading policy from: {}", policy_file);
     let policy = PolicyConfig::from_file(&policy_file)
         .map_err(|e| carapace_server::error::ServerError::ConfigError(e.to_string()))?;
-    tracing::info!("Policy loaded successfully: {} tools configured", policy.tools.len());
+    tracing::info!(
+        "Policy loaded successfully: {} tools configured",
+        policy.tools.len()
+    );
 
     // Create CLI dispatcher with policy
     let dispatcher = Arc::new(CliDispatcher::with_policy(policy));
@@ -69,7 +72,9 @@ async fn main() -> Result<()> {
         // SSH mode: single connection on stdin/stdout
         tracing::info!("Server ready, listening on stdin/stdout");
         let listener = Listener::new(dispatcher);
-        listener.listen(tokio::io::stdin(), tokio::io::stdout()).await?;
+        listener
+            .listen(tokio::io::stdin(), tokio::io::stdout())
+            .await?;
     }
 
     Ok(())

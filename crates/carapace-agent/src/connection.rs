@@ -18,10 +18,7 @@ pub struct Connection {
 
 impl Connection {
     /// Connect to server via TCP
-    pub async fn connect_tcp(
-        server_host: &str,
-        server_port: u16,
-    ) -> Result<Self> {
+    pub async fn connect_tcp(server_host: &str, server_port: u16) -> Result<Self> {
         Self::connect_tcp_with_config(server_host, server_port, 5, 100).await
     }
 
@@ -130,7 +127,10 @@ impl Connection {
                 Some(Ok(msg)) => Ok(Some(msg)),
                 Some(Err(e)) => {
                     tracing::error!("Failed to receive message: {}", e);
-                    Err(AgentError::SSHConnectionRefused(format!("Recv failed: {}", e)))
+                    Err(AgentError::SSHConnectionRefused(format!(
+                        "Recv failed: {}",
+                        e
+                    )))
                 }
                 None => Ok(None),
             }

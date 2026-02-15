@@ -104,9 +104,7 @@ fn test_rapid_request_response_cycles() {
 #[test]
 fn test_request_deduplication() {
     // Different requests should never have the same ID
-    let ids: Vec<String> = (0..100)
-        .map(|i| format!("request-{}", i))
-        .collect();
+    let ids: Vec<String> = (0..100).map(|i| format!("request-{}", i)).collect();
 
     let unique: std::collections::HashSet<_> = ids.iter().cloned().collect();
     assert_eq!(unique.len(), ids.len());
@@ -127,8 +125,14 @@ fn test_mixed_request_types() {
     requests.insert("http-1", RequestType::Http);
     requests.insert("sse-1", RequestType::Sse);
 
-    let cli_count = requests.values().filter(|r| **r == RequestType::Cli).count();
-    let http_count = requests.values().filter(|r| **r == RequestType::Http).count();
+    let cli_count = requests
+        .values()
+        .filter(|r| **r == RequestType::Cli)
+        .count();
+    let http_count = requests
+        .values()
+        .filter(|r| **r == RequestType::Http)
+        .count();
 
     assert_eq!(cli_count, 1);
     assert_eq!(http_count, 1);

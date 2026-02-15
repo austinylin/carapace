@@ -1,8 +1,8 @@
 use carapace_protocol::{Message, MessageCodec};
-use futures::{StreamExt, SinkExt};
+use futures::{SinkExt, StreamExt};
 use std::sync::Arc;
-use tokio_util::codec::{FramedRead, FramedWrite};
 use tokio::io::{AsyncRead, AsyncWrite};
+use tokio_util::codec::{FramedRead, FramedWrite};
 
 use crate::cli_dispatch::CliDispatcher;
 use crate::Result;
@@ -18,11 +18,7 @@ impl Listener {
     }
 
     /// Start listening for messages (typically on stdin/stdout)
-    pub async fn listen<R, W>(
-        &self,
-        stdin: R,
-        stdout: W,
-    ) -> Result<()>
+    pub async fn listen<R, W>(&self, stdin: R, stdout: W) -> Result<()>
     where
         R: AsyncRead + Unpin,
         W: AsyncWrite + Unpin,
@@ -52,19 +48,17 @@ impl Listener {
     /// Dispatch incoming message to appropriate handler
     async fn dispatch_message(&self, msg: Message) -> Option<Message> {
         match msg {
-            Message::CliRequest(req) => {
-                match self.dispatcher.dispatch_cli(req).await {
-                    Ok(resp) => Some(Message::CliResponse(resp)),
-                    Err(e) => {
-                        tracing::error!("CLI dispatch error: {}", e);
-                        Some(Message::Error(carapace_protocol::ErrorMessage {
-                            id: None,
-                            code: "cli_error".to_string(),
-                            message: e.to_string(),
-                        }))
-                    }
+            Message::CliRequest(req) => match self.dispatcher.dispatch_cli(req).await {
+                Ok(resp) => Some(Message::CliResponse(resp)),
+                Err(e) => {
+                    tracing::error!("CLI dispatch error: {}", e);
+                    Some(Message::Error(carapace_protocol::ErrorMessage {
+                        id: None,
+                        code: "cli_error".to_string(),
+                        message: e.to_string(),
+                    }))
                 }
-            }
+            },
             Message::HttpRequest(_req) => {
                 // HTTP dispatch not yet implemented
                 Some(Message::Error(carapace_protocol::ErrorMessage {
@@ -73,7 +67,10 @@ impl Listener {
                     message: "HTTP dispatch not yet implemented".to_string(),
                 }))
             }
-            Message::CliResponse(_) | Message::Error(_) | Message::HttpResponse(_) | Message::SseEvent { .. } => {
+            Message::CliResponse(_)
+            | Message::Error(_)
+            | Message::HttpResponse(_)
+            | Message::SseEvent { .. } => {
                 // Server should not receive these from client
                 tracing::warn!("Unexpected message type from client");
                 None

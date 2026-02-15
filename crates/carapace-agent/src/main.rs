@@ -1,5 +1,5 @@
+use carapace_agent::{CliHandler, Connection, HttpProxy, Multiplexer, Result as AgentResult};
 use std::sync::Arc;
-use carapace_agent::{Connection, Multiplexer, CliHandler, HttpProxy, Result as AgentResult};
 
 #[tokio::main]
 async fn main() -> AgentResult<()> {
@@ -17,15 +17,14 @@ async fn main() -> AgentResult<()> {
     let config = carapace_agent::config::AgentConfig::from_env();
 
     // Establish TCP connection to server
-    let connection = Arc::new(
-        Connection::connect_tcp(
-            &config.server.host,
-            config.server.port,
-        )
-        .await?,
-    );
+    let connection =
+        Arc::new(Connection::connect_tcp(&config.server.host, config.server.port).await?);
 
-    tracing::info!("TCP connection established to {}:{}", config.server.host, config.server.port);
+    tracing::info!(
+        "TCP connection established to {}:{}",
+        config.server.host,
+        config.server.port
+    );
 
     // Create multiplexer for request/response matching
     let multiplexer = Arc::new(Multiplexer::new());
@@ -61,7 +60,11 @@ async fn main() -> AgentResult<()> {
             tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
 
             if !connection_monitor.is_healthy().await {
-                tracing::warn!("Connection unhealthy, attempting automatic reconnection to {}:{}", server_host, server_port);
+                tracing::warn!(
+                    "Connection unhealthy, attempting automatic reconnection to {}:{}",
+                    server_host,
+                    server_port
+                );
                 if let Err(e) = connection_monitor.reconnect_if_needed().await {
                     tracing::error!("Auto-reconnection failed: {}", e);
                 } else {
@@ -99,13 +102,11 @@ async fn main() -> AgentResult<()> {
     );
 
     // Set up signal handlers for graceful shutdown
-    let mut sigterm = tokio::signal::unix::signal(
-        tokio::signal::unix::SignalKind::terminate(),
-    ).map_err(|e| carapace_agent::error::AgentError::IOError(e))?;
+    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .map_err(|e| carapace_agent::error::AgentError::IOError(e))?;
 
-    let mut sighup = tokio::signal::unix::signal(
-        tokio::signal::unix::SignalKind::hangup(),
-    ).map_err(|e| carapace_agent::error::AgentError::IOError(e))?;
+    let mut sighup = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())
+        .map_err(|e| carapace_agent::error::AgentError::IOError(e))?;
 
     // Wait for shutdown signal
     tokio::select! {

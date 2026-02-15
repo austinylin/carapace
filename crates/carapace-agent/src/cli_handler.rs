@@ -1,12 +1,12 @@
-use carapace_protocol::{Message, CliRequest};
+use carapace_protocol::{CliRequest, Message};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::net::{UnixListener, UnixStream};
 use uuid::Uuid;
 
-use crate::multiplexer::Multiplexer;
 use crate::connection::Connection;
 use crate::error::Result;
+use crate::multiplexer::Multiplexer;
 
 pub struct CliHandler {
     socket_path: String,
@@ -94,10 +94,7 @@ impl CliHandler {
             argv,
             env,
             stdin: None,
-            cwd: std::env::current_dir()?
-                .to_str()
-                .unwrap_or("/")
-                .to_string(),
+            cwd: std::env::current_dir()?.to_str().unwrap_or("/").to_string(),
         };
 
         // Register waiter for response
@@ -108,13 +105,12 @@ impl CliHandler {
         connection.send(msg).await?;
 
         // Wait for response (with timeout)
-        let response = tokio::time::timeout(
-            tokio::time::Duration::from_secs(30),
-            rx,
-        )
-        .await
-        .map_err(|_| crate::error::AgentError::RequestTimeout("CLI request timeout".to_string()))?
-        .map_err(|_| crate::error::AgentError::RequestNotFound(id))?;
+        let response = tokio::time::timeout(tokio::time::Duration::from_secs(30), rx)
+            .await
+            .map_err(|_| {
+                crate::error::AgentError::RequestTimeout("CLI request timeout".to_string())
+            })?
+            .map_err(|_| crate::error::AgentError::RequestNotFound(id))?;
 
         // Send response back to client
         let json = serde_json::to_vec(&response)?;

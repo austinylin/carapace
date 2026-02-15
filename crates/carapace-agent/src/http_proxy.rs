@@ -1,19 +1,19 @@
-use carapace_protocol::{Message, HttpRequest};
-use std::sync::Arc;
 use axum::{
+    body::Body,
     extract::State,
     http::{Request, StatusCode},
-    body::Body,
     response::{IntoResponse, Response},
     routing::post,
     Router,
 };
-use uuid::Uuid;
+use carapace_protocol::{HttpRequest, Message};
 use std::collections::HashMap;
+use std::sync::Arc;
+use uuid::Uuid;
 
-use crate::multiplexer::Multiplexer;
 use crate::connection::Connection;
 use crate::error::Result as AgentResult;
+use crate::multiplexer::Multiplexer;
 use tokio::time::timeout;
 
 /// HTTP proxy that converts HTTP requests to protocol messages
@@ -73,11 +73,12 @@ async fn handle_rpc(
     let body_str = String::from_utf8_lossy(&body_bytes).to_string();
 
     // Parse JSON-RPC to extract tool name (from context or body)
-    let json: serde_json::Value = serde_json::from_str(&body_str)
-        .map_err(|_| HttpProxyError::MalformedJson)?;
+    let json: serde_json::Value =
+        serde_json::from_str(&body_str).map_err(|_| HttpProxyError::MalformedJson)?;
 
     // Extract method to determine tool (simplified - assume body has tool field)
-    let tool = json.get("tool")
+    let tool = json
+        .get("tool")
         .and_then(|v| v.as_str())
         .unwrap_or("unknown")
         .to_string();
@@ -110,12 +111,9 @@ async fn handle_rpc(
 
     // Wait for response with 60 second timeout
     // Note: For true streaming SSE, server should send SseEvent messages instead of buffering response
-    let response_result = timeout(
-        tokio::time::Duration::from_secs(60),
-        rx,
-    )
-    .await
-    .map_err(|_| HttpProxyError::NoResponse)?;
+    let response_result = timeout(tokio::time::Duration::from_secs(60), rx)
+        .await
+        .map_err(|_| HttpProxyError::NoResponse)?;
 
     match response_result {
         Ok(Message::HttpResponse(resp)) => {
@@ -199,12 +197,9 @@ async fn handle_http(
 
     // Wait for response with 60 second timeout
     // Note: For true streaming SSE, server should send SseEvent messages instead of buffering response
-    let response_result = timeout(
-        tokio::time::Duration::from_secs(60),
-        rx,
-    )
-    .await
-    .map_err(|_| HttpProxyError::NoResponse)?;
+    let response_result = timeout(tokio::time::Duration::from_secs(60), rx)
+        .await
+        .map_err(|_| HttpProxyError::NoResponse)?;
 
     match response_result {
         Ok(Message::HttpResponse(resp)) => {
@@ -250,7 +245,6 @@ fn is_sse_response(headers: &HashMap<String, String>) -> bool {
         .unwrap_or(false)
 }
 
-
 /// Error types for HTTP proxy
 #[derive(Debug)]
 enum HttpProxyError {
@@ -265,14 +259,10 @@ impl IntoResponse for HttpProxyError {
         let (status, error_message) = match self {
             HttpProxyError::InvalidBody => (StatusCode::BAD_REQUEST, "Invalid request body"),
             HttpProxyError::MalformedJson => (StatusCode::BAD_REQUEST, "Malformed JSON"),
-            HttpProxyError::WrongResponseType => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Wrong response type",
-            ),
-            HttpProxyError::NoResponse => (
-                StatusCode::GATEWAY_TIMEOUT,
-                "No response from server",
-            ),
+            HttpProxyError::WrongResponseType => {
+                (StatusCode::INTERNAL_SERVER_ERROR, "Wrong response type")
+            }
+            HttpProxyError::NoResponse => (StatusCode::GATEWAY_TIMEOUT, "No response from server"),
         };
 
         (status, error_message).into_response()

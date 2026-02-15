@@ -57,14 +57,18 @@ fn test_audit_log_policy_decision_logging() {
 #[test]
 fn test_audit_sensitive_data_redaction() {
     // Passwords and tokens should be redacted in logs
-    let argv_with_token = vec!["gh".to_string(), "--token".to_string(), "ghp_secret123".to_string()];
+    let argv_with_token = vec![
+        "gh".to_string(),
+        "--token".to_string(),
+        "ghp_secret123".to_string(),
+    ];
 
     // Should redact tokens
     let redacted_argv = argv_with_token
         .iter()
         .enumerate()
         .map(|(i, arg)| {
-            if i > 0 && argv_with_token[i-1].contains("--token") {
+            if i > 0 && argv_with_token[i - 1].contains("--token") {
                 "[REDACTED]".to_string()
             } else {
                 arg.clone()
@@ -117,9 +121,7 @@ fn test_audit_log_contains_response_summary() {
 fn test_audit_log_timestamp_accuracy() {
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap();
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
 
     // Timestamp should be recent (within last second)
     assert!(now.as_secs() > 0);

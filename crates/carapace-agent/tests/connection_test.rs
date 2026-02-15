@@ -1,4 +1,4 @@
-use carapace_protocol::{Message, CliRequest};
+use carapace_protocol::{CliRequest, Message};
 use std::collections::HashMap;
 
 #[test]
@@ -29,9 +29,7 @@ fn test_request_id_generation() {
 #[test]
 fn test_concurrent_request_ids() {
     // Multiple IDs generated concurrently should all be unique
-    let ids: Vec<String> = (0..100)
-        .map(|_| uuid::Uuid::new_v4().to_string())
-        .collect();
+    let ids: Vec<String> = (0..100).map(|_| uuid::Uuid::new_v4().to_string()).collect();
 
     let unique_count = ids.iter().collect::<std::collections::HashSet<_>>().len();
     assert_eq!(unique_count, 100, "All IDs should be unique");

@@ -1,5 +1,5 @@
+use carapace_policy::{ArgvMatcher, PolicyConfig, PolicyValidator};
 use carapace_protocol::{CliRequest, CliResponse};
-use carapace_policy::{PolicyConfig, PolicyValidator, ArgvMatcher};
 use std::collections::HashMap;
 use tokio::process::Command;
 
@@ -74,7 +74,9 @@ impl CliDispatcher {
         }
 
         // Execute the command
-        let output = self.execute_command(&cli_policy.binary, &req.argv, &merged_env).await?;
+        let output = self
+            .execute_command(&cli_policy.binary, &req.argv, &merged_env)
+            .await?;
 
         Ok(CliResponse {
             id: req.id,

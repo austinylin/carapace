@@ -1,8 +1,8 @@
 use carapace_protocol::CliRequest;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use tokio::net::UnixStream;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::UnixStream;
 use uuid::Uuid;
 
 #[tokio::main]
@@ -15,10 +15,7 @@ async fn main() -> anyhow::Result<()> {
     let argv: Vec<String> = std::env::args().skip(1).collect();
 
     // Get current working directory
-    let cwd = std::env::current_dir()?
-        .to_str()
-        .unwrap_or("/")
-        .to_string();
+    let cwd = std::env::current_dir()?.to_str().unwrap_or("/").to_string();
 
     // Collect environment variables
     let env: HashMap<String, String> = std::env::vars().collect();
@@ -39,7 +36,10 @@ async fn main() -> anyhow::Result<()> {
     let mut stream = match UnixStream::connect(&socket_path).await {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("Error: Could not connect to carapace agent at {}: {}", socket_path, e);
+            eprintln!(
+                "Error: Could not connect to carapace agent at {}: {}",
+                socket_path, e
+            );
             std::process::exit(1);
         }
     };
@@ -63,17 +63,11 @@ async fn main() -> anyhow::Result<()> {
     let response_json: serde_json::Value = serde_json::from_slice(&response_buf[..n])?;
 
     // Extract fields
-    let exit_code = response_json["exit_code"]
-        .as_i64()
-        .unwrap_or(-1) as i32;
+    let exit_code = response_json["exit_code"].as_i64().unwrap_or(-1) as i32;
 
-    let stdout = response_json["stdout"]
-        .as_str()
-        .unwrap_or("");
+    let stdout = response_json["stdout"].as_str().unwrap_or("");
 
-    let stderr = response_json["stderr"]
-        .as_str()
-        .unwrap_or("");
+    let stderr = response_json["stderr"].as_str().unwrap_or("");
 
     // Print output
     if !stdout.is_empty() {
@@ -100,11 +94,10 @@ fn extract_tool_name(argv0: &str) -> String {
 /// Get the path to the agent socket
 fn get_agent_socket_path() -> String {
     // Try to get from environment variable first
-    std::env::var("CARAPACE_AGENT_SOCKET")
-        .unwrap_or_else(|_| {
-            // Default to /tmp/carapace-agent.sock
-            "/tmp/carapace-agent.sock".to_string()
-        })
+    std::env::var("CARAPACE_AGENT_SOCKET").unwrap_or_else(|_| {
+        // Default to /tmp/carapace-agent.sock
+        "/tmp/carapace-agent.sock".to_string()
+    })
 }
 
 #[cfg(test)]

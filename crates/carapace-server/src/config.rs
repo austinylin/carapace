@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-use crate::error::{ServerError, Result};
+use crate::error::{Result, ServerError};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {

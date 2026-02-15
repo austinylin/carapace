@@ -51,7 +51,9 @@ impl PolicyValidator {
 
     /// Validate that argv doesn't contain shell metacharacters (high-risk)
     pub fn has_dangerous_shell_chars(s: &str) -> bool {
-        const DANGEROUS_CHARS: &[char] = &[';', '|', '&', '$', '`', '(', ')', '<', '>', '\n', '\r', '\t'];
+        const DANGEROUS_CHARS: &[char] = &[
+            ';', '|', '&', '$', '`', '(', ')', '<', '>', '\n', '\r', '\t',
+        ];
         s.chars().any(|c| DANGEROUS_CHARS.contains(&c))
     }
 }
@@ -83,7 +85,8 @@ mod tests {
         let allowed = vec!["*".to_string()]; // Allow all
         let denied = vec!["deleteEverything".to_string()];
 
-        let result = PolicyValidator::validate_jsonrpc_method("deleteEverything", &allowed, &denied);
+        let result =
+            PolicyValidator::validate_jsonrpc_method("deleteEverything", &allowed, &denied);
         assert!(result.is_err());
     }
 
@@ -107,8 +110,12 @@ mod tests {
 
         // To actually deny all, you need to configure an allowed list with specific methods
         let allowed_restricted = vec!["send".to_string()];
-        let result2 = PolicyValidator::validate_jsonrpc_method("receive", &allowed_restricted, &denied);
-        assert!(result2.is_err(), "Method not in allowed list should be denied");
+        let result2 =
+            PolicyValidator::validate_jsonrpc_method("receive", &allowed_restricted, &denied);
+        assert!(
+            result2.is_err(),
+            "Method not in allowed list should be denied"
+        );
     }
 
     #[test]
@@ -145,9 +152,15 @@ mod tests {
         assert!(PolicyValidator::has_dangerous_shell_chars("test < file"));
         assert!(PolicyValidator::has_dangerous_shell_chars("test > file"));
 
-        assert!(!PolicyValidator::has_dangerous_shell_chars("normal argument"));
-        assert!(!PolicyValidator::has_dangerous_shell_chars("arg-with-dashes"));
-        assert!(!PolicyValidator::has_dangerous_shell_chars("arg_with_underscores"));
+        assert!(!PolicyValidator::has_dangerous_shell_chars(
+            "normal argument"
+        ));
+        assert!(!PolicyValidator::has_dangerous_shell_chars(
+            "arg-with-dashes"
+        ));
+        assert!(!PolicyValidator::has_dangerous_shell_chars(
+            "arg_with_underscores"
+        ));
         assert!(!PolicyValidator::has_dangerous_shell_chars("arg123"));
     }
 

@@ -1,5 +1,5 @@
-use serde::Serialize;
 use chrono::Utc;
+use serde::Serialize;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::Path;
@@ -12,7 +12,7 @@ pub struct AuditLogEntry {
     pub timestamp: String,
     pub request_id: String,
     pub tool: String,
-    pub action_type: String, // "cli" or "http"
+    pub action_type: String,   // "cli" or "http"
     pub policy_result: String, // "allow" or "deny"
     pub reason: Option<String>,
     pub argv: Option<Vec<String>>,
@@ -105,7 +105,11 @@ impl AuditLogger {
             request_id: request_id.to_string(),
             tool: tool.to_string(),
             action_type: "cli".to_string(),
-            policy_result: if allowed { "allow".to_string() } else { "deny".to_string() },
+            policy_result: if allowed {
+                "allow".to_string()
+            } else {
+                "deny".to_string()
+            },
             reason: reason.map(|s| s.to_string()),
             argv: redacted_argv,
             method: None,
@@ -170,7 +174,11 @@ impl AuditLogger {
             request_id: request_id.to_string(),
             tool: tool.to_string(),
             action_type: "http".to_string(),
-            policy_result: if allowed { "allow".to_string() } else { "deny".to_string() },
+            policy_result: if allowed {
+                "allow".to_string()
+            } else {
+                "deny".to_string()
+            },
             reason: reason.map(|s| s.to_string()),
             argv: None,
             method: Some(method.to_string()),
@@ -185,12 +193,7 @@ impl AuditLogger {
     }
 
     /// Log an HTTP response
-    pub fn log_http_response(
-        &self,
-        request_id: &str,
-        status: u16,
-        latency_ms: u64,
-    ) {
+    pub fn log_http_response(&self, request_id: &str, status: u16, latency_ms: u64) {
         if !self.enabled {
             return;
         }
@@ -296,18 +299,10 @@ impl AuditLogger {
             let old_name = if i == 0 {
                 log_file.to_string()
             } else {
-                format!(
-                    "{}.{}",
-                    path.with_extension("").to_string_lossy(),
-                    i
-                )
+                format!("{}.{}", path.with_extension("").to_string_lossy(), i)
             };
 
-            let new_name = format!(
-                "{}.{}",
-                path.with_extension("").to_string_lossy(),
-                i + 1
-            );
+            let new_name = format!("{}.{}", path.with_extension("").to_string_lossy(), i + 1);
 
             if Path::new(&old_name).exists() {
                 if i + 1 < self.keep_logs {
