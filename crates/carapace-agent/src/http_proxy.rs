@@ -40,11 +40,12 @@ impl HttpProxy {
         // Build router with both multiplexer and connection as state
         let app_state = (multiplexer, connection);
         let app = Router::new()
-            .route("/rpc", post(handle_rpc))
-            .route("/api/:tool/:path", post(handle_http))
-            .route("/api/v1/events", get(handle_events))
-            .route("/api/v1/check", get(handle_check))
-            .fallback(post(handle_fallback)) // Catch-all for other paths like /api/v1/rpc
+            .route("/api/v1/rpc", post(handle_api_v1_rpc)) // Explicit route for signal-cli RPC
+            .route("/api/v1/events", get(handle_events)) // Explicit route for SSE
+            .route("/api/v1/check", get(handle_check)) // Explicit route for health check
+            .route("/rpc", post(handle_rpc)) // Generic /rpc endpoint
+            .route("/api/:tool/:path", post(handle_http)) // Generic tool:path routing
+            .fallback(post(handle_fallback)) // Catch-all for other /api/v1/* paths
             .with_state(app_state);
 
         // Bind to localhost:port
@@ -158,6 +159,86 @@ async fn handle_rpc(
                 )
                     .into_response())
             }
+        }
+        Ok(_) => Err(HttpProxyError::WrongResponseType),
+        Err(_) => Err(HttpProxyError::NoResponse),
+    }
+}
+
+/// Handle signal-cli RPC requests at /api/v1/rpc
+/// OpenClaw sends JSON-RPC to this endpoint without a "tool" field,
+/// so we hardcode tool="signal-cli" since this endpoint is signal-cli specific
+async fn handle_api_v1_rpc(
+    State((multiplexer, connection)): State<ProxyState>,
+    request: Request<Body>,
+) -> std::result::Result<Response, HttpProxyError> {
+    // Extract the original request URI path before reading body
+    let path = request.uri().path().to_string();
+
+    // Read body
+    let body_bytes = axum::body::to_bytes(request.into_body(), usize::MAX)
+        .await
+        .map_err(|_| HttpProxyError::InvalidBody)?;
+
+    let body_str = String::from_utf8_lossy(&body_bytes).to_string();
+
+    // Parse JSON-RPC to extract tool name (from body, or default to signal-cli)
+    let json: serde_json::Value =
+        serde_json::from_str(&body_str).map_err(|_| HttpProxyError::MalformedJson)?;
+
+    // Extract method to determine tool (or use signal-cli as default since this is /api/v1/rpc)
+    let tool = json
+        .get("tool")
+        .and_then(|v| v.as_str())
+        .unwrap_or("signal-cli")
+        .to_string();
+
+    let request_id = Uuid::new_v4().to_string();
+
+    // Remove "tool" field from JSON body (it's for Carapace, not the upstream service)
+    let mut json_body = json.clone();
+    if let serde_json::Value::Object(ref mut obj) = json_body {
+        obj.remove("tool");
+    }
+    let body_without_tool = serde_json::to_string(&json_body).unwrap_or_else(|_| body_str.clone());
+
+    // Create HttpRequest with original path
+    let http_req = HttpRequest {
+        id: request_id.clone(),
+        tool,
+        method: "POST".to_string(),
+        path,
+        headers: {
+            let mut h = HashMap::new();
+            h.insert("Content-Type".to_string(), "application/json".to_string());
+            h
+        },
+        body: Some(body_without_tool),
+    };
+
+    // Register waiter for response
+    let rx = multiplexer.register_waiter(request_id).await;
+
+    // Send request to server via SSH connection
+    let msg = Message::HttpRequest(http_req);
+    connection.send(msg).await.map_err(|e| {
+        tracing::error!("Failed to send HTTP request: {}", e);
+        HttpProxyError::NoResponse
+    })?;
+
+    // Wait for response with 60 second timeout
+    let response_result = timeout(tokio::time::Duration::from_secs(60), rx)
+        .await
+        .map_err(|_| HttpProxyError::NoResponse)?;
+
+    match response_result {
+        Ok(Message::HttpResponse(resp)) => {
+            let body = resp.body.unwrap_or_default();
+            Ok((
+                StatusCode::from_u16(resp.status).unwrap_or(StatusCode::OK),
+                body,
+            )
+                .into_response())
         }
         Ok(_) => Err(HttpProxyError::WrongResponseType),
         Err(_) => Err(HttpProxyError::NoResponse),
