@@ -1,5 +1,5 @@
 use carapace_policy::PolicyConfig;
-use carapace_server::{CliDispatcher, HttpDispatcher, Listener, Result};
+use carapace_server::{CliDispatcher, ConnectionTracker, HttpDispatcher, Listener, Result};
 use clap::Parser;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -48,14 +48,19 @@ async fn main() -> Result<()> {
     // Create HTTP dispatcher with policy
     let http_dispatcher = Arc::new(HttpDispatcher::with_policy(policy));
 
+    // Create connection tracker
+    let connection_tracker = ConnectionTracker::new();
+
     // Start debug HTTP server if requested
     if let Some(debug_addr) = args.debug_listen {
         let debug_addr_parsed: std::net::SocketAddr = debug_addr.parse().map_err(|e| {
             carapace_server::ServerError::ConfigError(format!("Invalid debug address: {}", e))
         })?;
+        let tracker_clone = connection_tracker.clone();
         tokio::spawn(async move {
             if let Err(e) =
-                carapace_server::debug_server::start_debug_server(debug_addr_parsed).await
+                carapace_server::debug_server::start_debug_server(debug_addr_parsed, tracker_clone)
+                    .await
             {
                 tracing::error!("Debug server error: {}", e);
             }
@@ -75,11 +80,16 @@ async fn main() -> Result<()> {
                     tracing::info!("New connection from {}", addr);
                     let cli_dispatcher = cli_dispatcher.clone();
                     let http_dispatcher = http_dispatcher.clone();
+                    let tracker_clone = connection_tracker.clone();
 
                     eprintln!("DEBUG: About to spawn listener task");
                     tokio::spawn(async move {
                         eprintln!("DEBUG: In spawned task for {}", addr);
                         tracing::info!("Spawned listener task for connection from {}", addr);
+
+                        // Register the connection
+                        tracker_clone.register(addr).await;
+
                         let (read, write) = stream.into_split();
                         eprintln!("DEBUG: Stream split");
                         let listener = Listener::new(cli_dispatcher, http_dispatcher);
@@ -91,6 +101,10 @@ async fn main() -> Result<()> {
                             eprintln!("DEBUG: Connection error: {}", e);
                             tracing::error!("Connection error for {}: {}", addr, e);
                         }
+
+                        // Unregister the connection
+                        tracker_clone.unregister(addr).await;
+
                         eprintln!("DEBUG: Connection from {} closed", addr);
                         tracing::info!("Connection from {} closed", addr);
                     });
@@ -104,10 +118,20 @@ async fn main() -> Result<()> {
     } else {
         // SSH mode: single connection on stdin/stdout
         tracing::info!("Server ready, listening on stdin/stdout");
+
+        // Register stdin/stdout as a connection for SSH mode
+        let stdin_addr: std::net::SocketAddr = "127.0.0.1:0"
+            .parse()
+            .expect("Failed to parse dummy address");
+        connection_tracker.register(stdin_addr).await;
+
         let listener = Listener::new(cli_dispatcher, http_dispatcher);
-        listener
+        let result = listener
             .listen(tokio::io::stdin(), tokio::io::stdout())
-            .await?;
+            .await;
+
+        connection_tracker.unregister(stdin_addr).await;
+        result?;
     }
 
     Ok(())

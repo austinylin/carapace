@@ -1,19 +1,26 @@
 use anyhow::Result;
 use serde_json::json;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 
+use crate::ConnectionTracker;
+
 /// Start HTTP debug server on specified address
-pub async fn start_debug_server(addr: SocketAddr) -> Result<()> {
+pub async fn start_debug_server(
+    addr: SocketAddr,
+    connection_tracker: Arc<ConnectionTracker>,
+) -> Result<()> {
     let listener = TcpListener::bind(addr).await?;
 
     tracing::info!("Debug HTTP server listening on {}", addr);
 
     loop {
         let (socket, _) = listener.accept().await?;
+        let tracker = connection_tracker.clone();
         tokio::spawn(async move {
-            if let Err(e) = handle_client(socket).await {
+            if let Err(e) = handle_client(socket, tracker).await {
                 eprintln!("Error handling debug client: {}", e);
             }
         });
@@ -21,7 +28,10 @@ pub async fn start_debug_server(addr: SocketAddr) -> Result<()> {
 }
 
 /// Handle a single HTTP client connection
-async fn handle_client(socket: TcpStream) -> Result<()> {
+async fn handle_client(
+    socket: TcpStream,
+    connection_tracker: Arc<ConnectionTracker>,
+) -> Result<()> {
     let (reader, mut writer) = socket.into_split();
     let mut bufreader = BufReader::new(reader);
     let mut request_line = String::new();
@@ -52,8 +62,10 @@ async fn handle_client(socket: TcpStream) -> Result<()> {
 
     // Generate response based on path
     let response = match (method, path) {
-        ("GET", "/debug/health") => create_json_response(handle_health()),
-        ("GET", "/debug/connections") => create_json_response(handle_connections()),
+        ("GET", "/debug/health") => create_json_response(handle_health(&connection_tracker).await),
+        ("GET", "/debug/connections") => {
+            create_json_response(handle_connections(&connection_tracker).await)
+        }
         ("GET", "/debug/audit") => create_json_response(handle_audit()),
         ("POST", "/debug/policy") => create_json_response(handle_policy()),
         _ => create_json_response(json!({"error": "Not found"})),
@@ -76,11 +88,12 @@ fn create_json_response(body: serde_json::Value) -> String {
 }
 
 /// Handle GET /debug/health
-fn handle_health() -> serde_json::Value {
+async fn handle_health(connection_tracker: &ConnectionTracker) -> serde_json::Value {
+    let active_connections = connection_tracker.count().await;
     json!({
         "status": "healthy",
         "uptime_secs": 0,
-        "active_connections": 0,
+        "active_connections": active_connections,
         "metrics": {
             "requests_processed": 0,
             "errors": 0
@@ -89,9 +102,20 @@ fn handle_health() -> serde_json::Value {
 }
 
 /// Handle GET /debug/connections
-fn handle_connections() -> serde_json::Value {
+async fn handle_connections(connection_tracker: &ConnectionTracker) -> serde_json::Value {
+    let connections = connection_tracker.get_all().await;
+    let connection_list: Vec<serde_json::Value> = connections
+        .iter()
+        .map(|conn| {
+            json!({
+                "remote_addr": conn.remote_addr.to_string(),
+                "connected_at": conn.connected_at.to_rfc3339()
+            })
+        })
+        .collect();
+
     json!({
-        "connections": []
+        "connections": connection_list
     })
 }
 
