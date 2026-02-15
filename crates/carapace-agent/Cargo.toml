@@ -23,3 +23,5 @@ futures = { workspace = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 carapace-protocol = { path = "../carapace-protocol" }
+carapace-policy = { path = "../carapace-policy" }
+carapace-server = { path = "../carapace-server" }
