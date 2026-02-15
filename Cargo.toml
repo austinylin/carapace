@@ -5,6 +5,7 @@ members = [
     "crates/carapace-agent",
     "crates/carapace-server",
     "crates/carapace-shim",
+    "crates/carapace-debug",
 ]
 
 [workspace.dependencies]

@@ -16,15 +16,13 @@ tools:
       - removeAccount
       - unregister
 
-    # Filter on phone numbers (customize for your use case)
+    # Filter on phone numbers - RESTRICT TO ONLY +12246192888
     jsonrpc_param_filters:
       send:
         field: "recipientNumber"
         allow_patterns:
-          - "+1*"              # Allow all US numbers (customize as needed)
-        deny_patterns:
-          - "+15551234567"     # Block specific spam number
-          - "+18005551212"     # Block another number
+          - "+12246192888"     # Only allow sending to this number
+        deny_patterns: []
 
     rate_limit:
       max_requests: 100  # Max 100 messages per minute

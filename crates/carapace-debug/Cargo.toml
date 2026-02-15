@@ -1,0 +1,22 @@
+[package]
+name = "carapace-debug"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+clap = { workspace = true }
+anyhow = "1.0"
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+bytes = { workspace = true }
+futures = { workspace = true }
+reqwest = { workspace = true }
+
+carapace-protocol = { path = "../carapace-protocol" }
+carapace-policy = { path = "../carapace-policy" }
+
+# For reading audit logs
+chrono = { version = "0.4", features = ["serde"] }

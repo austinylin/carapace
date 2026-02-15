@@ -13,7 +13,8 @@ fn test_param_filter_allow_pattern() {
         },
     );
 
-    let body = r#"{"jsonrpc":"2.0","id":"1","method":"send","params":{"recipientNumber":"+15551234567"}}"#;
+    let body =
+        r#"{"jsonrpc":"2.0","id":"1","method":"send","params":{"recipientNumber":"+15551234567"}}"#;
 
     let result = PolicyValidator::validate_jsonrpc_params("send", body, &filters);
     assert!(result.is_ok());
@@ -31,7 +32,8 @@ fn test_param_filter_deny_pattern() {
         },
     );
 
-    let body = r#"{"jsonrpc":"2.0","id":"1","method":"send","params":{"recipientNumber":"+15551234567"}}"#;
+    let body =
+        r#"{"jsonrpc":"2.0","id":"1","method":"send","params":{"recipientNumber":"+15551234567"}}"#;
 
     let result = PolicyValidator::validate_jsonrpc_params("send", body, &filters);
     assert!(result.is_err());
@@ -49,7 +51,8 @@ fn test_param_filter_deny_takes_precedence() {
         },
     );
 
-    let body = r#"{"jsonrpc":"2.0","id":"1","method":"send","params":{"recipientNumber":"+15551234567"}}"#;
+    let body =
+        r#"{"jsonrpc":"2.0","id":"1","method":"send","params":{"recipientNumber":"+15551234567"}}"#;
 
     let result = PolicyValidator::validate_jsonrpc_params("send", body, &filters);
     assert!(result.is_err(), "Deny should take precedence over allow");
@@ -90,25 +93,33 @@ fn test_param_filter_multiple_allowed_patterns() {
         "send".to_string(),
         ParamFilter {
             field: "recipientNumber".to_string(),
-            allow_patterns: vec!["+1555*".to_string(), "+1777*".to_string(), "+1888*".to_string()],
+            allow_patterns: vec![
+                "+1555*".to_string(),
+                "+1777*".to_string(),
+                "+1888*".to_string(),
+            ],
             deny_patterns: vec![],
         },
     );
 
     // Test first pattern
-    let body1 = r#"{"jsonrpc":"2.0","id":"1","method":"send","params":{"recipientNumber":"+15559999999"}}"#;
+    let body1 =
+        r#"{"jsonrpc":"2.0","id":"1","method":"send","params":{"recipientNumber":"+15559999999"}}"#;
     assert!(PolicyValidator::validate_jsonrpc_params("send", body1, &filters).is_ok());
 
     // Test second pattern
-    let body2 = r#"{"jsonrpc":"2.0","id":"1","method":"send","params":{"recipientNumber":"+17778888888"}}"#;
+    let body2 =
+        r#"{"jsonrpc":"2.0","id":"1","method":"send","params":{"recipientNumber":"+17778888888"}}"#;
     assert!(PolicyValidator::validate_jsonrpc_params("send", body2, &filters).is_ok());
 
     // Test third pattern
-    let body3 = r#"{"jsonrpc":"2.0","id":"1","method":"send","params":{"recipientNumber":"+18889999999"}}"#;
+    let body3 =
+        r#"{"jsonrpc":"2.0","id":"1","method":"send","params":{"recipientNumber":"+18889999999"}}"#;
     assert!(PolicyValidator::validate_jsonrpc_params("send", body3, &filters).is_ok());
 
     // Test non-matching pattern
-    let body4 = r#"{"jsonrpc":"2.0","id":"1","method":"send","params":{"recipientNumber":"+19999999999"}}"#;
+    let body4 =
+        r#"{"jsonrpc":"2.0","id":"1","method":"send","params":{"recipientNumber":"+19999999999"}}"#;
     assert!(PolicyValidator::validate_jsonrpc_params("send", body4, &filters).is_err());
 }
 
@@ -125,11 +136,13 @@ fn test_param_filter_allow_without_deny() {
     );
 
     // Matching allow pattern
-    let body1 = r#"{"jsonrpc":"2.0","id":"1","method":"send","params":{"recipientNumber":"+15551234567"}}"#;
+    let body1 =
+        r#"{"jsonrpc":"2.0","id":"1","method":"send","params":{"recipientNumber":"+15551234567"}}"#;
     assert!(PolicyValidator::validate_jsonrpc_params("send", body1, &filters).is_ok());
 
     // Non-matching allow pattern
-    let body2 = r#"{"jsonrpc":"2.0","id":"1","method":"send","params":{"recipientNumber":"+18009999999"}}"#;
+    let body2 =
+        r#"{"jsonrpc":"2.0","id":"1","method":"send","params":{"recipientNumber":"+18009999999"}}"#;
     assert!(PolicyValidator::validate_jsonrpc_params("send", body2, &filters).is_err());
 }
 
@@ -146,11 +159,13 @@ fn test_param_filter_deny_without_allow() {
     );
 
     // In deny list
-    let body1 = r#"{"jsonrpc":"2.0","id":"1","method":"send","params":{"recipientNumber":"+15551234567"}}"#;
+    let body1 =
+        r#"{"jsonrpc":"2.0","id":"1","method":"send","params":{"recipientNumber":"+15551234567"}}"#;
     assert!(PolicyValidator::validate_jsonrpc_params("send", body1, &filters).is_err());
 
     // Not in deny list (should be allowed)
-    let body2 = r#"{"jsonrpc":"2.0","id":"1","method":"send","params":{"recipientNumber":"+19999999999"}}"#;
+    let body2 =
+        r#"{"jsonrpc":"2.0","id":"1","method":"send","params":{"recipientNumber":"+19999999999"}}"#;
     assert!(PolicyValidator::validate_jsonrpc_params("send", body2, &filters).is_ok());
 }
 
@@ -167,11 +182,13 @@ fn test_param_filter_wildcard_patterns() {
     );
 
     // Valid US number not in deny pattern
-    let body1 = r#"{"jsonrpc":"2.0","id":"1","method":"send","params":{"recipientNumber":"+14155552222"}}"#;
+    let body1 =
+        r#"{"jsonrpc":"2.0","id":"1","method":"send","params":{"recipientNumber":"+14155552222"}}"#;
     assert!(PolicyValidator::validate_jsonrpc_params("send", body1, &filters).is_ok());
 
     // Valid US number but in deny pattern
-    let body2 = r#"{"jsonrpc":"2.0","id":"1","method":"send","params":{"recipientNumber":"+15551234567"}}"#;
+    let body2 =
+        r#"{"jsonrpc":"2.0","id":"1","method":"send","params":{"recipientNumber":"+15551234567"}}"#;
     assert!(PolicyValidator::validate_jsonrpc_params("send", body2, &filters).is_err());
 
     // Non-US number

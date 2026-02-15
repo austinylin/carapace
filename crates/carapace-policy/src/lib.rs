@@ -3,7 +3,9 @@ pub mod error;
 pub mod matcher;
 pub mod validator;
 
-pub use config::{AuditConfig, CliPolicy, HttpPolicy, ParamFilter, PolicyConfig, RateLimit, ToolPolicy};
+pub use config::{
+    AuditConfig, CliPolicy, HttpPolicy, ParamFilter, PolicyConfig, RateLimit, ToolPolicy,
+};
 pub use error::PolicyError;
 pub use matcher::ArgvMatcher;
 pub use validator::PolicyValidator;

@@ -15,10 +15,7 @@ pub struct Listener {
 }
 
 impl Listener {
-    pub fn new(
-        cli_dispatcher: Arc<CliDispatcher>,
-        http_dispatcher: Arc<HttpDispatcher>,
-    ) -> Self {
+    pub fn new(cli_dispatcher: Arc<CliDispatcher>, http_dispatcher: Arc<HttpDispatcher>) -> Self {
         Listener {
             cli_dispatcher,
             http_dispatcher,
@@ -31,13 +28,29 @@ impl Listener {
         R: AsyncRead + Unpin,
         W: AsyncWrite + Unpin,
     {
+        eprintln!("DEBUG: listener.listen() called - STARTING");
+        tracing::info!("Listener: listen() called - starting");
         let mut frame_read = FramedRead::new(stdin, MessageCodec);
         let mut frame_write = FramedWrite::new(stdout, MessageCodec);
+        eprintln!("DEBUG: Framed read/write created");
 
         // Main loop: read messages and dispatch them
         while let Some(result) = frame_read.next().await {
+            tracing::info!("Listener: Processing incoming message");
             match result {
                 Ok(msg) => {
+                    // Log what type of message we received
+                    match &msg {
+                        Message::CliRequest(_) => tracing::debug!("Received CliRequest message"),
+                        Message::HttpRequest(_) => tracing::debug!("Received HttpRequest message"),
+                        Message::CliResponse(_) => tracing::debug!("Received CliResponse message"),
+                        Message::HttpResponse(_) => {
+                            tracing::debug!("Received HttpResponse message")
+                        }
+                        Message::Error(_) => tracing::debug!("Received Error message"),
+                        Message::SseEvent { .. } => tracing::debug!("Received SseEvent message"),
+                    }
+
                     // Dispatch message
                     if let Some(response) = self.dispatch_message(msg).await {
                         frame_write.send(response).await?;
@@ -77,7 +90,11 @@ impl Listener {
 
                 match self.http_dispatcher.dispatch_http(req.clone()).await {
                     Ok(response) => {
-                        tracing::info!("HTTP request {} succeeded with status {}", response.id, response.status);
+                        tracing::info!(
+                            "HTTP request {} succeeded with status {}",
+                            response.id,
+                            response.status
+                        );
                         Some(Message::HttpResponse(response))
                     }
                     Err(e) => {

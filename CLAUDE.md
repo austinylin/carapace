@@ -12,6 +12,7 @@ crates/
 ├── carapace-shim/          # Tool name resolver - symlinked as tool names
 ├── carapace-policy/        # Policy parsing & matching (glob patterns)
 ├── carapace-protocol/      # Message framing & serialization (length-prefixed JSON)
+├── carapace-debug/         # Debugging toolkit - sniff, audit, health, policy test
 └── carapace-multiplexer/   # Request/response correlation by message ID
 examples/                   # Example policy files
 .github/workflows/          # CI/CD pipelines (test.yml, build.yml)
@@ -42,6 +43,11 @@ examples/                   # Example policy files
 **Protocol:**
 - `crates/carapace-protocol/src/messages.rs` - CliRequest/CliResponse serialization
 - `crates/carapace-protocol/src/framing.rs` - Length-prefixed message encoding/decoding
+
+**Debugging:**
+- `crates/carapace-debug/src/main.rs` - Multi-command debug CLI
+- `DEBUGGING.md` - Complete guide with examples for all debug commands
+- `DEBUG_TOOLS_READY.md` - Quick deployment checklist
 
 ## Testing & CI/CD
 
@@ -152,12 +158,46 @@ tools:
 3. Restart server: `sudo systemctl restart carapace-server.service`
 4. Test from VM: `mytool read something`
 
-### Debugging Policy Issues
+### Using the Debug Toolkit
+
+The `carapace-debug` CLI provides efficient, token-saving debugging without log tailing:
+
+```bash
+# Check if server is running
+carapace-debug health
+
+# See active connections in real-time
+carapace-debug connections --watch 5
+
+# 🌟 SNIFF TCP messages (see exact protocol flow)
+carapace-debug sniff --filter HttpRequest
+
+# Query audit log (structured, not grep)
+carapace-debug audit --tool signal-cli --since 5m
+
+# Test policy decision without running full system
+carapace-debug policy /etc/carapace/policy.yaml '{
+  "tool":"signal-cli",
+  "method":"send",
+  "params":{"recipientNumber":"+12246192888"}
+}'
+```
+
+**Debugging Workflow for Message Flow Issues:**
+1. Run `carapace-debug health` → confirm server is responding
+2. Run `carapace-debug connections` → verify agent is connected
+3. Run `carapace-debug sniff --filter HttpRequest` → see messages in real-time
+4. Send a test message from VM
+5. If message appears in sniff: problem is downstream (dispatch/policy)
+6. If message doesn't appear: problem is upstream (framing/transmission)
+
+**See `DEBUGGING.md` for complete guide with all examples.**
+
+### Debugging Policy Issues (Old Method - Not Recommended)
 1. Check policy file syntax: `cat /etc/carapace/policy.yaml`
-2. Check server logs: `sudo journalctl -u carapace-server.service -f`
-3. Check agent logs: `sudo journalctl -u carapace-agent.service -f`
-4. Check audit logs: `sudo tail -f /var/log/carapace/audit.log`
-5. Verify TCP connection: `nc -zv host.example.com 8765`
+2. Use `carapace-debug policy` to test decisions (faster, more accurate)
+3. Check server logs: `sudo journalctl -u carapace-server.service -f` (last resort)
+4. Verify TCP connection: `nc -zv host.example.com 8765`
 
 ### Debugging Test Failures
 - Run tests locally: `cargo test --lib` (fast, no integration)
@@ -278,10 +318,17 @@ git push origin main
 # Development
 cargo build                          # Debug build
 cargo build --release               # Optimized binaries
-cargo test                           # All 238 tests
+cargo test                           # All tests
 cargo test -p carapace-server       # Single crate tests
 cargo fmt                            # Auto-format
 cargo clippy --all-targets --all-features -- -D warnings  # Linting with warnings-as-errors
+
+# Debugging (no log tailing!)
+carapace-debug health                # Server health check
+carapace-debug connections           # Active connections
+carapace-debug sniff                 # Capture TCP messages (key for troubleshooting)
+carapace-debug audit --tool X        # Query audit log
+carapace-debug policy policy.yaml '{request}'  # Test policy decision
 
 # Local Testing
 RUST_LOG=debug cargo run --bin carapace-server      # Server with debug logs
@@ -339,11 +386,16 @@ git status                           # Working tree status
 
 - RFC: OpenClaw problem statement in README.md
 - Example deployment: examples/policies/1password.yaml
+- Example signal-cli policy: examples/policies/signal-cli.yaml
 - Threat model: README.md "Security Considerations" section
 - Deployment guide: README.md "Deployment Example" sections
+- Debugging guide: DEBUGGING.md (complete with examples)
+- Quick debug checklist: DEBUG_TOOLS_READY.md
 
 ---
 
 **Last Updated**: 2026-02-15
-**Test Coverage**: 238 tests (all passing)
+**Crates**: 6 (added carapace-debug)
+**Test Coverage**: All passing
 **CI/CD Status**: ✅ Tests & Build workflows passing
+**Debug Toolkit**: ✅ Ready (5 subcommands: health, connections, sniff, audit, policy)
