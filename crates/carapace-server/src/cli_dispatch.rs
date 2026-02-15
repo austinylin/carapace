@@ -1,6 +1,7 @@
 use carapace_policy::{ArgvMatcher, PolicyConfig, PolicyValidator};
 use carapace_protocol::{CliRequest, CliResponse};
 use std::collections::HashMap;
+use std::time::Duration;
 use tokio::process::Command;
 
 /// Handles CLI command execution with policy enforcement
@@ -73,9 +74,14 @@ impl CliDispatcher {
             merged_env.insert(key.clone(), value.clone());
         }
 
-        // Execute the command
+        // Execute the command with policy timeout
         let output = self
-            .execute_command(&cli_policy.binary, &req.argv, &merged_env)
+            .execute_command(
+                &cli_policy.binary,
+                &req.argv,
+                &merged_env,
+                cli_policy.timeout_secs,
+            )
             .await?;
 
         Ok(CliResponse {
@@ -86,12 +92,13 @@ impl CliDispatcher {
         })
     }
 
-    /// Execute a command with the given argv and environment
+    /// Execute a command with the given argv, environment, and timeout
     async fn execute_command(
         &self,
         binary: &str,
         argv: &[String],
         env: &HashMap<String, String>,
+        timeout_secs: u64,
     ) -> anyhow::Result<std::process::Output> {
         let mut cmd = Command::new(binary);
 
@@ -105,10 +112,46 @@ impl CliDispatcher {
             cmd.env(key, value);
         }
 
-        // Capture output
-        let output = cmd.output().await?;
+        // Capture stdout/stderr
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
 
-        Ok(output)
+        let mut child = cmd.spawn()?;
+
+        // Wait for process with timeout - kill if it exceeds the limit
+        match tokio::time::timeout(Duration::from_secs(timeout_secs), child.wait()).await {
+            Ok(Ok(status)) => {
+                // Process exited within timeout - collect output
+                let stdout = if let Some(mut out) = child.stdout.take() {
+                    let mut buf = Vec::new();
+                    tokio::io::AsyncReadExt::read_to_end(&mut out, &mut buf).await?;
+                    buf
+                } else {
+                    Vec::new()
+                };
+                let stderr = if let Some(mut err) = child.stderr.take() {
+                    let mut buf = Vec::new();
+                    tokio::io::AsyncReadExt::read_to_end(&mut err, &mut buf).await?;
+                    buf
+                } else {
+                    Vec::new()
+                };
+                Ok(std::process::Output {
+                    status,
+                    stdout,
+                    stderr,
+                })
+            }
+            Ok(Err(e)) => Err(anyhow::anyhow!("Command failed: {}", e)),
+            Err(_) => {
+                // Timeout exceeded - kill the process
+                child.kill().await.ok();
+                Err(anyhow::anyhow!(
+                    "Command timed out after {} seconds",
+                    timeout_secs
+                ))
+            }
+        }
     }
 }
 

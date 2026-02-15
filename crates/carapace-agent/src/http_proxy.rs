@@ -114,27 +114,31 @@ async fn handle_rpc(
     };
 
     // Register waiter for response
-    let mut rx = multiplexer.register_waiter(request_id).await;
+    let mut rx = multiplexer.register_waiter(request_id.clone()).await;
 
-    // Send request to server via SSH connection
+    // Send request to server via connection
     let msg = Message::HttpRequest(http_req);
-    connection.send(msg).await.map_err(|e| {
+    if let Err(e) = connection.send(msg).await {
+        multiplexer.remove_waiter(&request_id).await;
         tracing::error!("Failed to send HTTP request: {}", e);
-        HttpProxyError::NoResponse
-    })?;
+        return Err(HttpProxyError::NoResponse);
+    }
 
     // Wait for response with 60 second timeout
-    let msg = timeout(tokio::time::Duration::from_secs(60), rx.recv())
-        .await
-        .map_err(|_| HttpProxyError::NoResponse)?;
+    let msg = match timeout(tokio::time::Duration::from_secs(60), rx.recv()).await {
+        Ok(msg) => msg,
+        Err(_) => {
+            multiplexer.remove_waiter(&request_id).await;
+            return Err(HttpProxyError::NoResponse);
+        }
+    };
+
+    multiplexer.remove_waiter(&request_id).await;
 
     match msg {
         Some(Message::HttpResponse(resp)) => {
             // Check if this is an SSE response
             if is_sse_response(&resp.headers) {
-                // For SSE, body will be streamed line-by-line
-                // Note: Current implementation buffers the entire response
-                // For true streaming with very large responses, server should send SseEvent messages
                 let events = resp
                     .body
                     .as_deref()
@@ -216,19 +220,26 @@ async fn handle_api_v1_rpc(
     };
 
     // Register waiter for response
-    let mut rx = multiplexer.register_waiter(request_id).await;
+    let mut rx = multiplexer.register_waiter(request_id.clone()).await;
 
-    // Send request to server via SSH connection
+    // Send request to server via connection
     let msg = Message::HttpRequest(http_req);
-    connection.send(msg).await.map_err(|e| {
+    if let Err(e) = connection.send(msg).await {
+        multiplexer.remove_waiter(&request_id).await;
         tracing::error!("Failed to send HTTP request: {}", e);
-        HttpProxyError::NoResponse
-    })?;
+        return Err(HttpProxyError::NoResponse);
+    }
 
     // Wait for response with 60 second timeout
-    let msg = timeout(tokio::time::Duration::from_secs(60), rx.recv())
-        .await
-        .map_err(|_| HttpProxyError::NoResponse)?;
+    let msg = match timeout(tokio::time::Duration::from_secs(60), rx.recv()).await {
+        Ok(msg) => msg,
+        Err(_) => {
+            multiplexer.remove_waiter(&request_id).await;
+            return Err(HttpProxyError::NoResponse);
+        }
+    };
+
+    multiplexer.remove_waiter(&request_id).await;
 
     match msg {
         Some(Message::HttpResponse(resp)) => {
@@ -299,27 +310,31 @@ async fn handle_http(
     };
 
     // Register waiter for response
-    let mut rx = multiplexer.register_waiter(request_id).await;
+    let mut rx = multiplexer.register_waiter(request_id.clone()).await;
 
-    // Send request to server via SSH connection
+    // Send request to server via connection
     let msg = Message::HttpRequest(http_req);
-    connection.send(msg).await.map_err(|e| {
+    if let Err(e) = connection.send(msg).await {
+        multiplexer.remove_waiter(&request_id).await;
         tracing::error!("Failed to send HTTP request: {}", e);
-        HttpProxyError::NoResponse
-    })?;
+        return Err(HttpProxyError::NoResponse);
+    }
 
     // Wait for response with 60 second timeout
-    let msg = timeout(tokio::time::Duration::from_secs(60), rx.recv())
-        .await
-        .map_err(|_| HttpProxyError::NoResponse)?;
+    let msg = match timeout(tokio::time::Duration::from_secs(60), rx.recv()).await {
+        Ok(msg) => msg,
+        Err(_) => {
+            multiplexer.remove_waiter(&request_id).await;
+            return Err(HttpProxyError::NoResponse);
+        }
+    };
+
+    multiplexer.remove_waiter(&request_id).await;
 
     match msg {
         Some(Message::HttpResponse(resp)) => {
             // Check if this is an SSE response
             if is_sse_response(&resp.headers) {
-                // For SSE, body will be streamed line-by-line
-                // Note: Current implementation buffers the entire response
-                // For true streaming with very large responses, server should send SseEvent messages
                 let events = resp
                     .body
                     .as_deref()
@@ -378,14 +393,15 @@ async fn handle_events(
     };
 
     // Register waiter for streaming responses
-    let mut rx = multiplexer.register_waiter(request_id).await;
+    let mut rx = multiplexer.register_waiter(request_id.clone()).await;
 
     // Send request to server
     let msg = Message::HttpRequest(http_req);
-    connection.send(msg).await.map_err(|e| {
+    if let Err(e) = connection.send(msg).await {
+        multiplexer.remove_waiter(&request_id).await;
         tracing::error!("Failed to send HTTP request: {}", e);
-        HttpProxyError::NoResponse
-    })?;
+        return Err(HttpProxyError::NoResponse);
+    }
 
     // For SSE streaming: collect events and stream to client
     let events_stream = async {
@@ -397,26 +413,26 @@ async fn handle_events(
                 Ok(Some(Message::SseEvent(evt))) => {
                     // Format as proper SSE: "event: type\ndata: json\n\n"
                     let line = format!("event: {}\ndata: {}\n\n", evt.event, evt.data);
-                    eprintln!("DEBUG: Streaming SseEvent to client: event={}", evt.event);
+                    tracing::debug!("Streaming SseEvent to client: event={}", evt.event);
                     events.push_str(&line);
                 }
                 Ok(Some(Message::HttpResponse(resp))) => {
                     // Fallback: if we get HttpResponse with buffered SSE content
-                    eprintln!("DEBUG: Received buffered HttpResponse (old streaming method)");
+                    tracing::debug!("Received buffered HttpResponse (old streaming method)");
                     let body = resp.body.unwrap_or_default();
                     events.push_str(&body);
                     break;
                 }
                 Ok(Some(_)) => {
-                    eprintln!("DEBUG: Unexpected message type in SSE stream");
+                    tracing::warn!("Unexpected message type in SSE stream");
                     break;
                 }
                 Ok(None) => {
-                    eprintln!("DEBUG: SSE channel closed (connection lost)");
+                    tracing::warn!("SSE channel closed (connection lost)");
                     break;
                 }
                 Err(_) => {
-                    eprintln!("DEBUG: SSE timeout (connection idle for 300s)");
+                    tracing::warn!("SSE timeout (connection idle for 300s)");
                     break;
                 }
             }
@@ -426,6 +442,7 @@ async fn handle_events(
     };
 
     let body = events_stream.await?;
+    multiplexer.remove_waiter(&request_id).await;
 
     Ok((
         StatusCode::OK,
@@ -523,19 +540,26 @@ async fn handle_fallback(
     };
 
     // Register waiter for response
-    let mut rx = multiplexer.register_waiter(request_id).await;
+    let mut rx = multiplexer.register_waiter(request_id.clone()).await;
 
     // Send request to server via connection
     let msg = Message::HttpRequest(http_req);
-    connection.send(msg).await.map_err(|e| {
+    if let Err(e) = connection.send(msg).await {
+        multiplexer.remove_waiter(&request_id).await;
         tracing::error!("Failed to send HTTP request: {}", e);
-        HttpProxyError::NoResponse
-    })?;
+        return Err(HttpProxyError::NoResponse);
+    }
 
     // Wait for response with 60 second timeout
-    let msg = timeout(tokio::time::Duration::from_secs(60), rx.recv())
-        .await
-        .map_err(|_| HttpProxyError::NoResponse)?;
+    let msg = match timeout(tokio::time::Duration::from_secs(60), rx.recv()).await {
+        Ok(msg) => msg,
+        Err(_) => {
+            multiplexer.remove_waiter(&request_id).await;
+            return Err(HttpProxyError::NoResponse);
+        }
+    };
+
+    multiplexer.remove_waiter(&request_id).await;
 
     match msg {
         Some(Message::HttpResponse(resp)) => {

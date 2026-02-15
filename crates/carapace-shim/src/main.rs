@@ -31,14 +31,26 @@ async fn main() -> anyhow::Result<()> {
         cwd,
     };
 
-    // Connect to agent socket
+    // Connect to agent socket (with timeout)
     let socket_path = get_agent_socket_path();
-    let mut stream = match UnixStream::connect(&socket_path).await {
-        Ok(s) => s,
-        Err(e) => {
+    let mut stream = match tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        UnixStream::connect(&socket_path),
+    )
+    .await
+    {
+        Ok(Ok(s)) => s,
+        Ok(Err(e)) => {
             eprintln!(
                 "Error: Could not connect to carapace agent at {}: {}",
                 socket_path, e
+            );
+            std::process::exit(1);
+        }
+        Err(_) => {
+            eprintln!(
+                "Error: Timed out connecting to carapace agent at {}",
+                socket_path
             );
             std::process::exit(1);
         }
@@ -49,18 +61,45 @@ async fn main() -> anyhow::Result<()> {
 
     // Send request
     stream.write_all(&request_json).await?;
+    stream.shutdown().await?;
 
-    // Read response
-    let mut response_buf = vec![0u8; 65536];
-    let n = stream.read(&mut response_buf).await?;
+    // Read response using dynamic buffer (with timeout)
+    let mut response_buf = Vec::with_capacity(65536);
+    let mut tmp = [0u8; 8192];
+    let read_result = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        loop {
+            let n = stream.read(&mut tmp).await?;
+            if n == 0 {
+                break;
+            }
+            response_buf.extend_from_slice(&tmp[..n]);
+        }
+        Ok::<(), std::io::Error>(())
+    })
+    .await;
 
-    if n == 0 {
+    match read_result {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => {
+            eprintln!("Error: Failed to read response from agent: {}", e);
+            std::process::exit(1);
+        }
+        Err(_) => {
+            eprintln!("Error: Timed out waiting for response from agent");
+            std::process::exit(1);
+        }
+    }
+
+    if response_buf.is_empty() {
         eprintln!("Error: No response from agent");
         std::process::exit(1);
     }
 
+    let n = response_buf.len();
+
     // Parse response
-    let response_json: serde_json::Value = serde_json::from_slice(&response_buf[..n])?;
+    let _ = n; // response_buf already sized correctly
+    let response_json: serde_json::Value = serde_json::from_slice(&response_buf)?;
 
     // Extract fields
     let exit_code = response_json["exit_code"].as_i64().unwrap_or(-1) as i32;

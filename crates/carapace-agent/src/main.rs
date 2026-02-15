@@ -41,10 +41,12 @@ async fn main() -> AgentResult<()> {
                 }
                 Ok(None) => {
                     tracing::warn!("TCP connection closed by server");
+                    multiplexer_response.cleanup_on_disconnect().await;
                     break;
                 }
                 Err(e) => {
                     tracing::error!("Error reading from TCP connection: {}", e);
+                    multiplexer_response.cleanup_on_disconnect().await;
                     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                 }
             }

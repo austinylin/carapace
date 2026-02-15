@@ -55,16 +55,27 @@ impl CliHandler {
     ) -> Result<()> {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-        // Read request from socket
-        let mut buf = [0u8; 4096];
-        let n = socket.read(&mut buf).await?;
+        // Read request from socket using dynamic buffer
+        let mut buf = Vec::with_capacity(8192);
+        let mut tmp = [0u8; 4096];
+        loop {
+            let n = socket.read(&mut tmp).await?;
+            if n == 0 {
+                break;
+            }
+            buf.extend_from_slice(&tmp[..n]);
+            // If we read less than the buffer, we likely have the full message
+            if n < tmp.len() {
+                break;
+            }
+        }
 
-        if n == 0 {
+        if buf.is_empty() {
             return Ok(());
         }
 
         // Parse JSON request
-        let req_json: serde_json::Value = serde_json::from_slice(&buf[..n])?;
+        let req_json: serde_json::Value = serde_json::from_slice(&buf)?;
 
         // Extract fields
         let tool = req_json["tool"].as_str().unwrap_or("unknown").to_string();
@@ -100,17 +111,31 @@ impl CliHandler {
         // Register waiter for response
         let mut rx = multiplexer.register_waiter(id.clone()).await;
 
-        // Send request to server via SSH connection
+        // Send request to server via connection
         let msg = Message::CliRequest(cli_req);
-        connection.send(msg).await?;
+        if let Err(e) = connection.send(msg).await {
+            multiplexer.remove_waiter(&id).await;
+            return Err(e);
+        }
 
         // Wait for response (with timeout)
-        let response = tokio::time::timeout(tokio::time::Duration::from_secs(30), rx.recv())
-            .await
-            .map_err(|_| {
-                crate::error::AgentError::RequestTimeout("CLI request timeout".to_string())
-            })?
-            .ok_or(crate::error::AgentError::RequestNotFound(id))?;
+        let response =
+            match tokio::time::timeout(tokio::time::Duration::from_secs(30), rx.recv()).await {
+                Ok(Some(msg)) => msg,
+                Ok(None) => {
+                    multiplexer.remove_waiter(&id).await;
+                    return Err(crate::error::AgentError::RequestNotFound(id));
+                }
+                Err(_) => {
+                    multiplexer.remove_waiter(&id).await;
+                    return Err(crate::error::AgentError::RequestTimeout(
+                        "CLI request timeout".to_string(),
+                    ));
+                }
+            };
+
+        // Clean up waiter after receiving response
+        multiplexer.remove_waiter(&id).await;
 
         // Send response back to client
         let json = serde_json::to_vec(&response)?;
