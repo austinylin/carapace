@@ -2,12 +2,16 @@ use axum::{
     body::Body,
     extract::State,
     http::{Request, StatusCode},
-    response::{IntoResponse, Response},
+    response::{
+        sse::{Event, Sse},
+        IntoResponse, Response,
+    },
     routing::{get, post},
     Router,
 };
 use carapace_protocol::{HttpRequest, Message};
 use std::collections::HashMap;
+use std::convert::Infallible;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -366,8 +370,8 @@ async fn handle_http(
 
 /// Handle SSE events endpoint (GET /api/v1/events)
 ///
-/// Streams SseEvent messages in real-time using HTTP streaming
-/// Each event is sent to the client immediately upon arrival (not buffered)
+/// Streams SseEvent messages in real-time using axum's Sse response type.
+/// Each event is forwarded to the client immediately upon arrival from the server.
 async fn handle_events(
     State((multiplexer, connection)): State<ProxyState>,
     request: Request<Body>,
@@ -393,7 +397,7 @@ async fn handle_events(
     };
 
     // Register waiter for streaming responses
-    let mut rx = multiplexer.register_waiter(request_id.clone()).await;
+    let rx = multiplexer.register_waiter(request_id.clone()).await;
 
     // Send request to server
     let msg = Message::HttpRequest(http_req);
@@ -403,53 +407,75 @@ async fn handle_events(
         return Err(HttpProxyError::NoResponse);
     }
 
-    // For SSE streaming: collect events and stream to client
-    let events_stream = async {
-        let mut events = String::new();
+    // Create a real-time stream from the multiplexer channel.
+    // Each SseEvent is yielded immediately — no buffering.
+    let stream = sse_stream_from_receiver(rx, multiplexer, request_id);
 
-        // Keep reading messages until connection closes
-        loop {
-            match timeout(tokio::time::Duration::from_secs(300), rx.recv()).await {
+    Ok(Sse::new(stream)
+        .keep_alive(
+            axum::response::sse::KeepAlive::new()
+                .interval(std::time::Duration::from_secs(15))
+                .text("keep-alive"),
+        )
+        .into_response())
+}
+
+/// Convert an mpsc::Receiver<Message> into a Stream of axum SSE Events.
+///
+/// Yields each SseEvent immediately as it arrives (real-time, no buffering).
+/// Ends when the channel closes, a non-SSE message arrives, or 300s idle timeout.
+/// Cleans up the multiplexer waiter when the stream ends.
+fn sse_stream_from_receiver(
+    rx: tokio::sync::mpsc::Receiver<Message>,
+    multiplexer: Arc<Multiplexer>,
+    request_id: String,
+) -> impl futures::stream::Stream<Item = Result<Event, Infallible>> {
+    futures::stream::unfold(
+        (rx, Some((multiplexer, request_id))),
+        |(mut rx, cleanup)| async move {
+            match tokio::time::timeout(tokio::time::Duration::from_secs(300), rx.recv()).await {
                 Ok(Some(Message::SseEvent(evt))) => {
-                    // Format as proper SSE: "event: type\ndata: json\n\n"
-                    let line = format!("event: {}\ndata: {}\n\n", evt.event, evt.data);
                     tracing::debug!("Streaming SseEvent to client: event={}", evt.event);
-                    events.push_str(&line);
+                    let event = Event::default().event(evt.event).data(evt.data);
+                    Some((Ok(event), (rx, cleanup)))
                 }
                 Ok(Some(Message::HttpResponse(resp))) => {
-                    // Fallback: if we get HttpResponse with buffered SSE content
-                    tracing::debug!("Received buffered HttpResponse (old streaming method)");
-                    let body = resp.body.unwrap_or_default();
-                    events.push_str(&body);
-                    break;
+                    // Fallback: buffered response from old-style server
+                    tracing::debug!("Received buffered HttpResponse in SSE stream");
+                    if let Some((mux, rid)) = cleanup {
+                        mux.remove_waiter(&rid).await;
+                    }
+                    if let Some(body) = resp.body {
+                        let event = Event::default().data(body);
+                        Some((Ok(event), (rx, None)))
+                    } else {
+                        None
+                    }
                 }
                 Ok(Some(_)) => {
                     tracing::warn!("Unexpected message type in SSE stream");
-                    break;
+                    if let Some((mux, rid)) = cleanup {
+                        mux.remove_waiter(&rid).await;
+                    }
+                    None
                 }
                 Ok(None) => {
                     tracing::warn!("SSE channel closed (connection lost)");
-                    break;
+                    if let Some((mux, rid)) = cleanup {
+                        mux.remove_waiter(&rid).await;
+                    }
+                    None
                 }
                 Err(_) => {
                     tracing::warn!("SSE timeout (connection idle for 300s)");
-                    break;
+                    if let Some((mux, rid)) = cleanup {
+                        mux.remove_waiter(&rid).await;
+                    }
+                    None
                 }
             }
-        }
-
-        Ok::<String, HttpProxyError>(events)
-    };
-
-    let body = events_stream.await?;
-    multiplexer.remove_waiter(&request_id).await;
-
-    Ok((
-        StatusCode::OK,
-        [(axum::http::header::CONTENT_TYPE, "text/event-stream")],
-        body,
+        },
     )
-        .into_response())
 }
 
 /// Handle health check endpoint (GET /api/v1/check)

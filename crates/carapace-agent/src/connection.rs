@@ -12,6 +12,7 @@ pub struct Connection {
     frame_read: Arc<Mutex<Option<FramedRead<tokio::net::tcp::OwnedReadHalf, MessageCodec>>>>,
     frame_write: Arc<Mutex<Option<FramedWrite<tokio::net::tcp::OwnedWriteHalf, MessageCodec>>>>,
     connected: Arc<AtomicBool>,
+    reconnected: Arc<tokio::sync::Notify>,
     server_host: String,
     server_port: u16,
     reconnect_attempts: u32,
@@ -34,6 +35,7 @@ impl Connection {
             frame_read: Arc::new(Mutex::new(None)),
             frame_write: Arc::new(Mutex::new(None)),
             connected: Arc::new(AtomicBool::new(false)),
+            reconnected: Arc::new(tokio::sync::Notify::new()),
             server_host: server_host.to_string(),
             server_port,
             reconnect_attempts,
@@ -56,6 +58,7 @@ impl Connection {
                     *read_lock = Some(frame_read);
                     *write_lock = Some(frame_write);
                     self.connected.store(true, Ordering::SeqCst);
+                    self.reconnected.notify_waiters();
 
                     tracing::info!(
                         "TCP connection established to {}:{} after {} attempts",
@@ -170,6 +173,12 @@ impl Connection {
     /// Check if connection is healthy (lock-free, does not block on recv/send)
     pub fn is_healthy(&self) -> bool {
         self.connected.load(Ordering::SeqCst)
+    }
+
+    /// Wait until a reconnection event occurs.
+    /// Blocks until `establish_connection()` completes successfully.
+    pub async fn wait_for_reconnect(&self) {
+        self.reconnected.notified().await;
     }
 
     /// Attempt reconnection if needed

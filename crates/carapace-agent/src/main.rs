@@ -30,11 +30,24 @@ async fn main() -> AgentResult<()> {
     // Create multiplexer for request/response matching
     let multiplexer = Arc::new(Multiplexer::new());
 
-    // Spawn background task to read messages from TCP connection and feed into multiplexer
+    // Spawn background task to read messages from TCP connection and feed into multiplexer.
+    // This loop never exits — on disconnect it waits for the ping monitor to reconnect,
+    // then resumes reading from the new connection (recv() picks up the new FramedRead
+    // via Arc<Mutex> on each call).
     let connection_read = connection.clone();
     let multiplexer_response = multiplexer.clone();
     tokio::spawn(async move {
         loop {
+            // If connection is down, clean up pending requests and wait for
+            // the ping monitor to re-establish the connection.
+            if !connection_read.is_healthy() {
+                tracing::warn!("Recv loop: connection lost, waiting for reconnection");
+                multiplexer_response.cleanup_on_disconnect().await;
+                connection_read.wait_for_reconnect().await;
+                tracing::info!("Recv loop: reconnection detected, resuming reads");
+                continue;
+            }
+
             match connection_read.recv().await {
                 Ok(Some(msg)) => {
                     // Handle Pong silently (keepalive response, not a real message)
@@ -47,13 +60,13 @@ async fn main() -> AgentResult<()> {
                 }
                 Ok(None) => {
                     tracing::warn!("TCP connection closed by server");
-                    multiplexer_response.cleanup_on_disconnect().await;
-                    break;
+                    // recv() already set connected=false; loop back to the
+                    // is_healthy() check which handles cleanup + wait.
                 }
                 Err(e) => {
                     tracing::error!("Error reading from TCP connection: {}", e);
-                    multiplexer_response.cleanup_on_disconnect().await;
-                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                    // recv() already set connected=false; loop back to the
+                    // is_healthy() check which handles cleanup + wait.
                 }
             }
         }
@@ -67,7 +80,7 @@ async fn main() -> AgentResult<()> {
     let ping_interval = std::env::var("CARAPACE_PING_INTERVAL_SECS")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(30u64);
+        .unwrap_or(5u64);
     tokio::spawn(async move {
         let mut ping_counter: u64 = 0;
         loop {

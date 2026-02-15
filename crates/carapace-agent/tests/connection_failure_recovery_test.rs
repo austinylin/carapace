@@ -3,7 +3,7 @@
 /// Tests resilience to network failures, connection drops, and recovery scenarios.
 /// These are critical for production stability.
 use carapace_agent::{Connection, Multiplexer};
-use carapace_protocol::{CliRequest, Message, MessageCodec};
+use carapace_protocol::{CliRequest, CliResponse, Message, MessageCodec, PingPong};
 use futures::{SinkExt, StreamExt};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -411,4 +411,231 @@ async fn test_transient_error_recovery() {
         .expect("Server didn't process");
 
     assert!(processed, "Server should have processed the request");
+}
+
+/// Test that wait_for_reconnect unblocks when reconnection succeeds
+#[tokio::test]
+async fn test_wait_for_reconnect_unblocks() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    // Server: accept connection, close it, then accept a second (reconnection)
+    tokio::spawn(async move {
+        // First connection - accept and close
+        let (socket, _) = listener.accept().await.unwrap();
+        drop(socket);
+
+        // Second connection (reconnection) - keep alive
+        let (_socket2, _) = listener.accept().await.unwrap();
+        tokio::time::sleep(Duration::from_secs(5)).await;
+    });
+
+    let connection = Arc::new(
+        Connection::connect_tcp_with_config("127.0.0.1", port, 5, 100)
+            .await
+            .unwrap(),
+    );
+
+    // Wait for server to close first connection
+    let _ = connection.recv().await;
+    assert!(!connection.is_healthy());
+
+    // Spawn reconnection after a short delay
+    let conn_clone = connection.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        conn_clone.reconnect_if_needed().await.unwrap();
+    });
+
+    // wait_for_reconnect should unblock once reconnect completes
+    let result =
+        tokio::time::timeout(Duration::from_secs(3), connection.wait_for_reconnect()).await;
+    assert!(
+        result.is_ok(),
+        "wait_for_reconnect should have been notified"
+    );
+    assert!(connection.is_healthy());
+}
+
+/// Test that recv loop recovers after server restart (full integration)
+///
+/// Simulates the exact production scenario:
+/// 1. Agent connects and processes a request
+/// 2. Server restarts (connection drops)
+/// 3. Ping monitor reconnects
+/// 4. Recv loop resumes reading from new connection
+/// 5. New requests work end-to-end
+#[tokio::test]
+async fn test_recv_loop_recovers_after_server_restart() {
+    // Phase 1: Start server, connect, verify round-trip works
+    let listener1 = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener1.local_addr().unwrap().port();
+
+    // Server v1: echo CliRequests with "phase1" stdout
+    let server1 = tokio::spawn(async move {
+        let (socket, _) = listener1.accept().await.unwrap();
+        let (reader, writer) = socket.into_split();
+        let mut frame_read = FramedRead::new(reader, MessageCodec);
+        let mut frame_write = FramedWrite::new(writer, MessageCodec);
+
+        while let Some(Ok(msg)) = frame_read.next().await {
+            match msg {
+                Message::CliRequest(req) => {
+                    let resp = Message::CliResponse(CliResponse {
+                        id: req.id,
+                        exit_code: 0,
+                        stdout: "phase1".to_string(),
+                        stderr: String::new(),
+                    });
+                    let _ = frame_write.send(resp).await;
+                    let _ = frame_write.flush().await;
+                }
+                Message::Ping(p) => {
+                    let _ = frame_write.send(Message::Pong(p)).await;
+                    let _ = frame_write.flush().await;
+                }
+                _ => {}
+            }
+        }
+    });
+
+    let connection = Arc::new(
+        Connection::connect_tcp_with_config("127.0.0.1", port, 5, 100)
+            .await
+            .unwrap(),
+    );
+    let multiplexer = Arc::new(Multiplexer::new());
+
+    // Spawn resilient recv loop (same logic as the fixed main.rs)
+    let conn_read = connection.clone();
+    let mux_read = multiplexer.clone();
+    tokio::spawn(async move {
+        loop {
+            if !conn_read.is_healthy() {
+                mux_read.cleanup_on_disconnect().await;
+                conn_read.wait_for_reconnect().await;
+                continue;
+            }
+
+            match conn_read.recv().await {
+                Ok(Some(msg)) => {
+                    if matches!(&msg, Message::Pong(_)) {
+                        continue;
+                    }
+                    mux_read.handle_response(msg).await;
+                }
+                Ok(None) | Err(_) => {
+                    // recv() already set connected=false; loop back to the
+                    // is_healthy() check which handles cleanup + wait.
+                }
+            }
+        }
+    });
+
+    // Spawn ping monitor (1s interval for fast test)
+    let conn_ping = connection.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            if !conn_ping.is_healthy() {
+                let _ = conn_ping.reconnect_if_needed().await;
+                continue;
+            }
+            let ping = Message::Ping(PingPong {
+                id: "test-ping".into(),
+                timestamp: 0,
+            });
+            let _ = conn_ping.send(ping).await;
+        }
+    });
+
+    // Phase 1: Verify round-trip works
+    let mut rx1 = multiplexer.register_waiter("req-1".into()).await;
+    connection
+        .send(Message::CliRequest(CliRequest {
+            id: "req-1".into(),
+            tool: "test".into(),
+            argv: vec![],
+            env: HashMap::new(),
+            stdin: None,
+            cwd: "/".into(),
+        }))
+        .await
+        .unwrap();
+
+    let resp1 = tokio::time::timeout(Duration::from_secs(5), rx1.recv())
+        .await
+        .expect("Phase 1 timeout")
+        .expect("Phase 1 no response");
+    match &resp1 {
+        Message::CliResponse(r) => assert_eq!(r.stdout, "phase1"),
+        _ => panic!("Expected CliResponse, got {:?}", resp1),
+    }
+    multiplexer.remove_waiter("req-1").await;
+
+    // Phase 2: Kill server, wait for detection
+    server1.abort();
+    tokio::time::sleep(Duration::from_secs(3)).await;
+
+    // Phase 3: Restart server on same port with "phase2" responses
+    let listener2 = TcpListener::bind(format!("127.0.0.1:{}", port))
+        .await
+        .expect("Failed to rebind to same port");
+
+    tokio::spawn(async move {
+        let (socket, _) = listener2.accept().await.unwrap();
+        let (reader, writer) = socket.into_split();
+        let mut frame_read = FramedRead::new(reader, MessageCodec);
+        let mut frame_write = FramedWrite::new(writer, MessageCodec);
+
+        while let Some(Ok(msg)) = frame_read.next().await {
+            match msg {
+                Message::CliRequest(req) => {
+                    let resp = Message::CliResponse(CliResponse {
+                        id: req.id,
+                        exit_code: 0,
+                        stdout: "phase2".to_string(),
+                        stderr: String::new(),
+                    });
+                    let _ = frame_write.send(resp).await;
+                    let _ = frame_write.flush().await;
+                }
+                Message::Ping(p) => {
+                    let _ = frame_write.send(Message::Pong(p)).await;
+                    let _ = frame_write.flush().await;
+                }
+                _ => {}
+            }
+        }
+    });
+
+    // Wait for reconnection to complete
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert!(
+        connection.is_healthy(),
+        "Connection should be healthy after reconnect"
+    );
+
+    // Phase 4: Verify round-trip works through new connection
+    let mut rx2 = multiplexer.register_waiter("req-2".into()).await;
+    connection
+        .send(Message::CliRequest(CliRequest {
+            id: "req-2".into(),
+            tool: "test".into(),
+            argv: vec![],
+            env: HashMap::new(),
+            stdin: None,
+            cwd: "/".into(),
+        }))
+        .await
+        .unwrap();
+
+    let resp2 = tokio::time::timeout(Duration::from_secs(5), rx2.recv())
+        .await
+        .expect("Phase 2 timeout - recv loop didn't recover")
+        .expect("Phase 2 no response - recv loop didn't recover");
+    match &resp2 {
+        Message::CliResponse(r) => assert_eq!(r.stdout, "phase2"),
+        _ => panic!("Expected CliResponse, got {:?}", resp2),
+    }
 }
