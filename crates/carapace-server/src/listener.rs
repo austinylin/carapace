@@ -69,12 +69,12 @@ impl Listener {
     /// Dispatch incoming message to appropriate handler
     async fn dispatch_message(&self, msg: Message) -> Option<Message> {
         match msg {
-            Message::CliRequest(req) => match self.cli_dispatcher.dispatch_cli(req).await {
+            Message::CliRequest(req) => match self.cli_dispatcher.dispatch_cli(req.clone()).await {
                 Ok(resp) => Some(Message::CliResponse(resp)),
                 Err(e) => {
                     tracing::error!("CLI dispatch error: {}", e);
                     Some(Message::Error(carapace_protocol::ErrorMessage {
-                        id: None,
+                        id: Some(req.id),
                         code: "cli_error".to_string(),
                         message: e.to_string(),
                     }))
@@ -98,9 +98,9 @@ impl Listener {
                         Some(Message::HttpResponse(response))
                     }
                     Err(e) => {
-                        tracing::error!("HTTP dispatch failed: {}", e);
+                        tracing::error!("HTTP dispatch failed for {}: {}", req.id, e);
                         Some(Message::Error(carapace_protocol::ErrorMessage {
-                            id: None,
+                            id: Some(req.id),
                             code: "http_error".to_string(),
                             message: format!("HTTP dispatch error: {}", e),
                         }))
