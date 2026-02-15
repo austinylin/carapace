@@ -28,12 +28,16 @@ impl HttpDispatcher {
 
     /// Dispatch an HTTP request, validate against policy, and proxy to upstream
     pub async fn dispatch_http(&self, req: HttpRequest) -> anyhow::Result<HttpResponse> {
+        eprintln!("DEBUG: http_dispatch.dispatch_http() called for tool={}, method={}, path={}", req.tool, req.method, req.path);
+
         // Check if tool is allowed in policy
         let tool_config = self
             .policy
             .tools
             .get(&req.tool)
             .ok_or_else(|| anyhow::anyhow!("Tool '{}' not in policy", req.tool))?;
+
+        eprintln!("DEBUG: Tool config found, proceeding with dispatch");
 
         // Get HTTP policy
         let http_policy = match tool_config {
@@ -86,7 +90,9 @@ impl HttpDispatcher {
         }
 
         // Send request to upstream
+        eprintln!("DEBUG: About to call proxy_to_upstream for {}", http_policy.upstream);
         let response = self.proxy_to_upstream(http_policy, &req).await?;
+        eprintln!("DEBUG: proxy_to_upstream returned successfully");
 
         Ok(response)
     }
@@ -97,7 +103,9 @@ impl HttpDispatcher {
         policy: &HttpPolicy,
         req: &HttpRequest,
     ) -> anyhow::Result<HttpResponse> {
+        eprintln!("DEBUG: proxy_to_upstream() starting for {}", req.tool);
         let url = format!("{}{}", policy.upstream, req.path);
+        eprintln!("DEBUG: Constructed URL: {}", url);
 
         let mut request_builder = match req.method.as_str() {
             "GET" => self.client.get(&url),
@@ -138,11 +146,20 @@ impl HttpDispatcher {
         };
 
         // Send request with timeout
+        eprintln!("DEBUG: About to send HTTP request with {} second timeout", timeout_duration.as_secs());
         let response = tokio::time::timeout(
             timeout_duration,
             request_builder.send(),
         )
-        .await??;
+        .await;
+
+        match &response {
+            Ok(Ok(r)) => eprintln!("DEBUG: HTTP request completed, got status: {}", r.status()),
+            Ok(Err(e)) => eprintln!("DEBUG: HTTP request failed: {}", e),
+            Err(_) => eprintln!("DEBUG: HTTP request timed out after {} seconds", timeout_duration.as_secs()),
+        }
+
+        let response = response??;
 
         // Extract response
         let status = response.status().as_u16();
