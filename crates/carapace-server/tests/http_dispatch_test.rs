@@ -100,12 +100,13 @@ fn test_sse_stream_parsing() {
 fn test_rate_limiting_structure() {
     // Rate limiting config
     #[derive(Debug)]
+    #[allow(dead_code)]
     struct RateLimit {
         max_requests: u32,
         window_secs: u64,
     }
 
-    let limits = vec![
+    let limits = [
         RateLimit {
             max_requests: 10,
             window_secs: 60,

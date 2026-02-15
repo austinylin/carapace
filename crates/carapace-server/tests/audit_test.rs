@@ -3,6 +3,7 @@ use std::collections::HashMap;
 #[test]
 fn test_audit_log_structure() {
     #[derive(Debug)]
+    #[allow(dead_code)]
     struct AuditLog {
         timestamp: String,
         tool: String,
@@ -38,6 +39,7 @@ fn test_audit_log_all_requests_logged() {
 #[test]
 fn test_audit_log_policy_decision_logging() {
     #[derive(Debug)]
+    #[allow(dead_code)]
     struct PolicyDecisionLog {
         id: String,
         decision: String,
@@ -83,6 +85,7 @@ fn test_audit_sensitive_data_redaction() {
 #[test]
 fn test_audit_log_contains_argv() {
     #[derive(Debug)]
+    #[allow(dead_code)]
     struct CliAuditLog {
         tool: String,
         argv: Vec<String>,
@@ -102,6 +105,7 @@ fn test_audit_log_contains_argv() {
 #[test]
 fn test_audit_log_contains_response_summary() {
     #[derive(Debug)]
+    #[allow(dead_code)]
     struct ResponseSummary {
         exit_code: i32,
         stdout_length: usize,
@@ -191,6 +195,7 @@ fn test_audit_structured_logging_json() {
 fn test_audit_log_missing_details_when_policy_denies() {
     // When policy denies, we might not log argv details
     #[derive(Debug)]
+    #[allow(dead_code)]
     struct DenyAuditLog {
         id: String,
         tool: String,
@@ -213,6 +218,7 @@ fn test_audit_log_missing_details_when_policy_denies() {
 fn test_audit_log_request_correlation() {
     // All logs related to one request should share an ID
     #[derive(Debug)]
+    #[allow(dead_code)]
     struct CorrelatedLogs {
         request_id: String,
         events: Vec<String>,
@@ -248,6 +254,7 @@ fn test_audit_log_latency_tracking() {
 #[test]
 fn test_audit_log_http_method_logging() {
     #[derive(Debug)]
+    #[allow(dead_code)]
     struct HttpAuditLog {
         tool: String,
         method: String,
@@ -284,6 +291,7 @@ fn test_audit_log_concurrent_requests_not_mixed() {
 fn test_audit_log_queryable() {
     // Logs should be queryable by various criteria
     #[derive(Debug)]
+    #[allow(dead_code)]
     struct QueryableLog {
         timestamp: String,
         tool: String,
