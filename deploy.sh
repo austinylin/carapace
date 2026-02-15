@@ -183,11 +183,15 @@ fi
 
 CARAPACE_SERVER="$EXTRACT_DIR/carapace-server"
 CARAPACE_AGENT="$EXTRACT_DIR/carapace-agent"
+CARAPACE_SHIM="$EXTRACT_DIR/carapace-shim"
 CARAPACE_DEBUG="$EXTRACT_DIR/carapace-debug"
 
 echo -e "${GREEN}✓ Binaries ready${NC}"
 echo "  Server: $(ls -lh "$CARAPACE_SERVER" | awk '{print $5}')"
 echo "  Agent:  $(ls -lh "$CARAPACE_AGENT" | awk '{print $5}')"
+if [[ -f "$CARAPACE_SHIM" ]]; then
+    echo "  Shim:   $(ls -lh "$CARAPACE_SHIM" | awk '{print $5}')"
+fi
 if [[ -f "$CARAPACE_DEBUG" ]]; then
     echo "  Debug:  $(ls -lh "$CARAPACE_DEBUG" | awk '{print $5}')"
 fi
@@ -224,6 +228,23 @@ ssh "$VM" "sudo cp /tmp/carapace-agent.new /usr/local/bin/carapace-agent && \
            rm /tmp/carapace-agent.new" 2>&1 >/dev/null || true
 
 echo -e "${GREEN}✓ Agent deployed${NC}"
+
+# Deploy shim to VM
+if [[ -f "$CARAPACE_SHIM" ]]; then
+    echo -e "${YELLOW}Deploying shim to VM...${NC}"
+    scp -q "$CARAPACE_SHIM" "$VM:/tmp/carapace-shim.new" || {
+        echo -e "${RED}Failed to copy shim to VM${NC}"
+        exit 1
+    }
+
+    ssh "$VM" "sudo cp /tmp/carapace-shim.new /usr/local/bin/carapace-shim && \
+               sudo chmod 755 /usr/local/bin/carapace-shim && \
+               rm /tmp/carapace-shim.new" 2>&1 >/dev/null || true
+
+    echo -e "${GREEN}✓ Shim deployed${NC}"
+else
+    echo -e "${YELLOW}⚠ carapace-shim not found in artifacts${NC}"
+fi
 
 # Deploy server to host
 echo -e "${YELLOW}Deploying server to host...${NC}"
