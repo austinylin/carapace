@@ -379,12 +379,10 @@ async fn test_sse_timeout_handling() {
 /// This test demonstrates the real problem: events that arrive
 /// after the 2-second buffering window are silently dropped.
 ///
-/// STATUS: Currently fails due to response.text() buffering semantics,
-/// but demonstrates the kind of test that SHOULD fail to catch the bug.
-/// The architectural issue is: we wait 2 seconds then return buffered response,
-/// which means any events arriving after 2 seconds are lost.
+/// This test FAILS on purpose to demonstrate the architectural issue.
+/// We wait 2 seconds for initial events, then return the response.
+/// Any events that arrive after 2 seconds are lost.
 #[tokio::test]
-#[ignore] // Currently fails due to test mocking complexity, but documents the issue
 async fn test_sse_events_after_timeout_window_lost() {
     // Mock signal-cli that sends events at different times
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
