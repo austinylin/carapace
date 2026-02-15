@@ -105,10 +105,14 @@ async fn start_carapace_server(upstream: &str) -> (String, Arc<HttpDispatcher>, 
                             let response: Option<Message> = match msg {
                                 Message::HttpRequest(req) => {
                                     eprintln!("Server: Processing HttpRequest id={}", req.id);
-                                    match http_dispatcher.dispatch_http(req.clone()).await {
-                                        Ok(resp) => {
+                                    match http_dispatcher.dispatch_http(req.clone(), None).await {
+                                        Ok(Some(resp)) => {
                                             eprintln!("Server: HttpRequest succeeded, sending response");
                                             Some(Message::HttpResponse(resp))
+                                        }
+                                        Ok(None) => {
+                                            eprintln!("Server: HttpRequest was SSE streaming, no response");
+                                            None
                                         }
                                         Err(e) => {
                                             eprintln!("Server: HttpRequest failed: {}", e);
@@ -220,7 +224,7 @@ async fn test_full_integration_signal_cli() {
     // 4. Make a request like the HTTP handler would
     eprintln!("\n4. Sending HTTP request through agent...");
     let request_id = "test-integration-1".to_string();
-    let rx = multiplexer.register_waiter(request_id.clone()).await;
+    let mut rx = multiplexer.register_waiter(request_id.clone()).await;
     eprintln!("   Registered waiter for request_id={}", request_id);
 
     let http_req = carapace_protocol::HttpRequest {
@@ -246,12 +250,12 @@ async fn test_full_integration_signal_cli() {
     eprintln!("   Waiting for response...");
     let response_result = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        rx
+        rx.recv()
     ).await;
 
     eprintln!("\n=== Test Results ===");
     match response_result {
-        Ok(Ok(Message::HttpResponse(resp))) => {
+        Ok(Some(Message::HttpResponse(resp))) => {
             eprintln!("✓ SUCCESS - Received HttpResponse!");
             eprintln!("  Status: {}", resp.status);
             eprintln!("  Body: {:?}", resp.body);
@@ -259,13 +263,13 @@ async fn test_full_integration_signal_cli() {
             assert!(resp.body.is_some());
             assert!(resp.body.unwrap().contains("0.13.24"));
         }
-        Ok(Ok(msg)) => {
+        Ok(Some(msg)) => {
             eprintln!("✗ FAIL - Received wrong message type: {:?}", msg);
             panic!("Expected HttpResponse");
         }
-        Ok(Err(e)) => {
-            eprintln!("✗ FAIL - Channel error: {}", e);
-            panic!("Channel error: {}", e);
+        Ok(None) => {
+            eprintln!("✗ FAIL - Channel closed");
+            panic!("Channel closed unexpectedly");
         }
         Err(_) => {
             eprintln!("✗ FAIL - Timeout waiting for response");

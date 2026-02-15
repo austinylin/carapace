@@ -268,8 +268,12 @@ async fn start_carapace_server(upstream: &str) -> (String, Arc<HttpDispatcher>) 
                         Ok(msg) => {
                             let response: Option<Message> = match msg {
                                 Message::HttpRequest(req) => {
-                                    match http_dispatcher.dispatch_http(req.clone()).await {
-                                        Ok(resp) => Some(Message::HttpResponse(resp)),
+                                    match http_dispatcher.dispatch_http(req.clone(), None).await {
+                                        Ok(Some(resp)) => Some(Message::HttpResponse(resp)),
+                                        Ok(None) => {
+                                            eprintln!("SSE streaming response");
+                                            None
+                                        }
                                         Err(e) => Some(Message::Error(
                                             carapace_protocol::ErrorMessage {
                                                 id: Some(req.id),
@@ -352,7 +356,7 @@ async fn test_openclaw_send_message() {
     // - message is the text
     // - OpenClaw uses UUID string for request ID
     let request_id = "550e8400-e29b-41d4-a716-446655440000".to_string();
-    let rx = multiplexer.register_waiter(request_id.clone()).await;
+    let mut rx = multiplexer.register_waiter(request_id.clone()).await;
 
     let http_req = carapace_protocol::HttpRequest {
         id: request_id.clone(),
@@ -379,12 +383,12 @@ async fn test_openclaw_send_message() {
 
     let response_result = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        rx,
+        rx.recv(),
     )
     .await;
 
     match response_result {
-        Ok(Ok(Message::HttpResponse(resp))) => {
+        Ok(Some(Message::HttpResponse(resp))) => {
             eprintln!("✓ Response received: status={}", resp.status);
             assert_eq!(resp.status, 200);
             assert!(resp.body.is_some());
@@ -434,7 +438,7 @@ async fn test_openclaw_send_typing_indicator() {
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
     let request_id = "550e8400-e29b-41d4-a716-446655440001".to_string();
-    let rx = multiplexer.register_waiter(request_id.clone()).await;
+    let mut rx = multiplexer.register_waiter(request_id.clone()).await;
 
     let http_req = carapace_protocol::HttpRequest {
         id: request_id.clone(),
@@ -462,12 +466,12 @@ async fn test_openclaw_send_typing_indicator() {
 
     let response_result = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        rx,
+        rx.recv(),
     )
     .await;
 
     match response_result {
-        Ok(Ok(Message::HttpResponse(resp))) => {
+        Ok(Some(Message::HttpResponse(resp))) => {
             eprintln!("✓ Typing indicator sent: status={}", resp.status);
             assert_eq!(resp.status, 200);
             // sendTyping returns null result
@@ -515,7 +519,7 @@ async fn test_openclaw_receive_events_sse() {
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
     let request_id = "550e8400-e29b-41d4-a716-446655440003".to_string();
-    let rx = multiplexer.register_waiter(request_id.clone()).await;
+    let mut rx = multiplexer.register_waiter(request_id.clone()).await;
 
     // Request SSE stream for events (from OpenClaw src/signal/client.ts streamSignalEvents)
     let http_req = carapace_protocol::HttpRequest {
@@ -535,12 +539,12 @@ async fn test_openclaw_receive_events_sse() {
 
     let response_result = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        rx,
+        rx.recv(),
     )
     .await;
 
     match response_result {
-        Ok(Ok(Message::HttpResponse(resp))) => {
+        Ok(Some(Message::HttpResponse(resp))) => {
             eprintln!("✓ Event stream received: status={}", resp.status);
             assert_eq!(resp.status, 200);
 
@@ -592,7 +596,7 @@ async fn test_openclaw_blocked_number() {
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
     let request_id = "550e8400-e29b-41d4-a716-446655440002".to_string();
-    let rx = multiplexer.register_waiter(request_id.clone()).await;
+    let mut rx = multiplexer.register_waiter(request_id.clone()).await;
 
     // Try to send to non-US number (policy allows +1* only)
     // Real OpenClaw format
@@ -620,16 +624,16 @@ async fn test_openclaw_blocked_number() {
 
     let response_result = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        rx,
+        rx.recv(),
     )
     .await;
 
     match response_result {
-        Ok(Ok(Message::Error(err))) => {
+        Ok(Some(Message::Error(err))) => {
             eprintln!("✓ Correctly blocked: {}", err.message);
             assert!(err.message.contains("Denied") || err.message.contains("not in allow list"));
         }
-        Ok(Ok(msg)) => {
+        Ok(Some(msg)) => {
             eprintln!("Unexpected message type: {:?}", msg);
             panic!("Expected error for blocked number");
         }
@@ -684,7 +688,7 @@ async fn test_openclaw_concurrent_requests() {
         let handle = tokio::spawn(async move {
             // Generate unique UUID-like ID for each request (matching OpenClaw format)
             let request_id = format!("550e8400-e29b-41d4-a716-44665544000{}", i);
-            let rx = mux.register_waiter(request_id.clone()).await;
+            let mut rx = mux.register_waiter(request_id.clone()).await;
 
             let http_req = carapace_protocol::HttpRequest {
                 id: request_id.clone(),
@@ -706,7 +710,7 @@ async fn test_openclaw_concurrent_requests() {
                 .await
                 .expect("Failed to send");
 
-            tokio::time::timeout(std::time::Duration::from_secs(5), rx)
+            tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
                 .await
                 .expect("Timeout")
                 .expect("Channel error")

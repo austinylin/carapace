@@ -1,5 +1,5 @@
 use carapace_policy::{HttpPolicy, PolicyConfig, PolicyValidator};
-use carapace_protocol::{HttpRequest, HttpResponse};
+use carapace_protocol::{HttpRequest, HttpResponse, Message, SseEvent};
 use reqwest::Client;
 use std::collections::HashMap;
 
@@ -27,7 +27,14 @@ impl HttpDispatcher {
     }
 
     /// Dispatch an HTTP request, validate against policy, and proxy to upstream
-    pub async fn dispatch_http(&self, req: HttpRequest) -> anyhow::Result<HttpResponse> {
+    ///
+    /// For SSE endpoints, sends SseEvent messages through sse_event_tx and returns None
+    /// For regular endpoints, returns HttpResponse with full body
+    pub async fn dispatch_http(
+        &self,
+        req: HttpRequest,
+        sse_event_tx: Option<tokio::sync::mpsc::UnboundedSender<Message>>,
+    ) -> anyhow::Result<Option<HttpResponse>> {
         eprintln!("DEBUG: http_dispatch.dispatch_http() called for tool={}, method={}, path={}", req.tool, req.method, req.path);
 
         // Check if tool is allowed in policy
@@ -91,7 +98,7 @@ impl HttpDispatcher {
 
         // Send request to upstream
         eprintln!("DEBUG: About to call proxy_to_upstream for {}", http_policy.upstream);
-        let response = self.proxy_to_upstream(http_policy, &req).await?;
+        let response = self.proxy_to_upstream(http_policy, &req, sse_event_tx).await?;
         eprintln!("DEBUG: proxy_to_upstream returned successfully");
 
         Ok(response)
@@ -102,7 +109,8 @@ impl HttpDispatcher {
         &self,
         policy: &HttpPolicy,
         req: &HttpRequest,
-    ) -> anyhow::Result<HttpResponse> {
+        sse_event_tx: Option<tokio::sync::mpsc::UnboundedSender<Message>>,
+    ) -> anyhow::Result<Option<HttpResponse>> {
         eprintln!("DEBUG: proxy_to_upstream() starting for {}", req.tool);
         let url = format!("{}{}", policy.upstream, req.path);
         eprintln!("DEBUG: Constructed URL: {}", url);
@@ -169,31 +177,102 @@ impl HttpDispatcher {
             .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
             .collect();
 
-        // For SSE endpoints, wait a bit for initial events before returning
-        // But don't wait forever - give the client a chance to receive initial data
+        // Handle SSE endpoints with real-time streaming
         let body = if is_sse_endpoint {
-            eprintln!("DEBUG: SSE endpoint detected - waiting 2 seconds for initial events");
-            // For SSE, wait a short time for initial events to arrive
-            // This allows the first batch of events to be sent immediately rather than
-            // delaying until the next event arrives (which could be minutes later)
-            tokio::time::timeout(
-                std::time::Duration::from_secs(2),
-                response.text(),
-            )
-            .await
-            .ok()
-            .and_then(|r| r.ok())
-            .or(Some(String::new())) // If timeout or error, return empty string
+            eprintln!("DEBUG: SSE endpoint detected - enabling real-time streaming");
+
+            if let Some(tx) = sse_event_tx {
+                // Stream events in real-time as they arrive from upstream
+                // Don't buffer - send each event immediately when received
+                use futures::StreamExt;
+
+                let mut stream = response.bytes_stream();
+                let mut buffer = String::new();
+                let mut event_count = 0;
+
+                while let Some(chunk_result) = stream.next().await {
+                    match chunk_result {
+                        Ok(chunk) => {
+                            buffer.push_str(&String::from_utf8_lossy(&chunk));
+
+                            // SSE format: "event: type\ndata: json_value\n\n"
+                            // Process complete events (delimited by \n\n)
+                            while let Some(end_pos) = buffer.find("\n\n") {
+                                let event_block = buffer[..end_pos].to_string();  // Clone to avoid borrow issues
+                                buffer = buffer[end_pos + 2..].to_string();
+
+                                // Parse SSE headers
+                                let mut event_type = String::new();
+                                let mut event_data = String::new();
+
+                                for line in event_block.lines() {
+                                    if let Some(e) = line.strip_prefix("event:") {
+                                        event_type = e.trim().to_string();
+                                    } else if let Some(d) = line.strip_prefix("data:") {
+                                        event_data = d.trim().to_string();
+                                    }
+                                }
+
+                                // Create and send SseEvent message IMMEDIATELY
+                                // This is the critical fix: <100ms latency, not 2 seconds!
+                                let sse_msg = Message::SseEvent(SseEvent {
+                                    id: req.id.clone(),
+                                    tool: req.tool.clone(),
+                                    event: event_type,
+                                    data: event_data,
+                                });
+
+                                event_count += 1;
+                                eprintln!(
+                                    "DEBUG: SSE event #{} sent immediately (id={}, event=...)",
+                                    event_count, req.id
+                                );
+
+                                // UnboundedSender::send() never blocks
+                                if let Err(e) = tx.send(sse_msg) {
+                                    eprintln!("DEBUG: SSE client disconnected: {}", e);
+                                    return Ok(None);  // Client gone, exit
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("DEBUG: Upstream connection error during SSE: {}", e);
+                            return Err(anyhow::anyhow!("Upstream SSE error: {}", e));
+                        }
+                    }
+                }
+
+                eprintln!("DEBUG: SSE stream completed, {} events sent", event_count);
+                // Return None: SSE response was streamed, not returned as HttpResponse
+                None
+            } else {
+                // Fallback: no sender provided (shouldn't happen with listener.rs properly set up)
+                eprintln!("DEBUG: SSE endpoint but sse_event_tx is None - using 2-second fallback");
+                tokio::time::timeout(
+                    std::time::Duration::from_secs(2),
+                    response.text(),
+                )
+                .await
+                .ok()
+                .and_then(|r| r.ok())
+                .or(Some(String::new()))
+            }
         } else {
-            eprintln!("DEBUG: Regular endpoint - buffering response body normally");
+            // Regular (non-SSE) endpoints: buffer normally
+            eprintln!("DEBUG: Regular endpoint - buffering full response");
             response.text().await.ok()
         };
 
-        Ok(HttpResponse {
-            id: req.id.clone(),
-            status,
-            headers,
-            body,
+        // Return HttpResponse wrapper or None for SSE
+        Ok(if let Some(body) = body {
+            Some(HttpResponse {
+                id: req.id.clone(),
+                status,
+                headers,
+                body: Some(body),
+            })
+        } else {
+            None  // SSE was streamed through sse_event_tx
         })
     }
 }
@@ -225,7 +304,7 @@ mod tests {
             body: None,
         };
 
-        let result = dispatcher.dispatch_http(req).await;
+        let result = dispatcher.dispatch_http(req, None).await;
         assert!(result.is_err());
     }
 
@@ -258,7 +337,7 @@ mod tests {
             body: None,
         };
 
-        let result = dispatcher.dispatch_http(req).await;
+        let result = dispatcher.dispatch_http(req, None).await;
         assert!(result.is_err());
     }
 
