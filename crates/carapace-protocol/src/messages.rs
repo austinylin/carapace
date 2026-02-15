@@ -74,7 +74,7 @@ pub struct HttpResponse {
 /// Server-sent event from upstream (streamed incrementally for SSE endpoints)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SseEvent {
-    pub id: RequestId,  // Correlates to HttpRequest.id for streaming responses
+    pub id: RequestId, // Correlates to HttpRequest.id for streaming responses
     pub tool: String,
     pub event: String,
     pub data: String,

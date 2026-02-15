@@ -52,7 +52,7 @@ impl Listener {
                     Err(e) => {
                         tracing::error!("Failed to send SSE event: {}", e);
                         eprintln!("DEBUG: SSE client disconnected: {}", e);
-                        break;  // Exit if client disconnected
+                        break; // Exit if client disconnected
                     }
                 }
             }
@@ -77,7 +77,9 @@ impl Listener {
                     }
 
                     // Dispatch message, passing SSE channel
-                    if let Some(response) = self.dispatch_message(msg, Some(sse_event_tx.clone())).await {
+                    if let Some(response) =
+                        self.dispatch_message(msg, Some(sse_event_tx.clone())).await
+                    {
                         if let Err(e) = frame_write.lock().await.send(response).await {
                             tracing::error!("Failed to send response: {}", e);
                             // Continue processing messages instead of closing connection
@@ -120,7 +122,11 @@ impl Listener {
                     req.tool
                 );
 
-                match self.http_dispatcher.dispatch_http(req.clone(), sse_event_tx).await {
+                match self
+                    .http_dispatcher
+                    .dispatch_http(req.clone(), sse_event_tx)
+                    .await
+                {
                     Ok(Some(response)) => {
                         // Non-SSE response: return normally
                         tracing::info!(

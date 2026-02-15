@@ -10,7 +10,6 @@
 /// 4. Make HTTP requests like OpenClaw would
 ///
 /// This allows us to debug the integration without touching production systems.
-
 use carapace_policy::{HttpPolicy, PolicyConfig, ToolPolicy};
 use carapace_protocol::{Message, MessageCodec};
 use futures::{SinkExt, StreamExt};
@@ -51,7 +50,9 @@ async fn start_mock_signal_cli_server(addr: &str) -> String {
                     // Send mock response
                     let response_body = match method.as_str() {
                         "version" => r#"{"jsonrpc":"2.0","result":{"version":"0.13.24"},"id":"1"}"#,
-                        "send" => r#"{"jsonrpc":"2.0","result":{"timestamp":1708000000000},"id":"1"}"#,
+                        "send" => {
+                            r#"{"jsonrpc":"2.0","result":{"timestamp":1708000000000},"id":"1"}"#
+                        }
                         "sendTyping" => r#"{"jsonrpc":"2.0","result":null,"id":"1"}"#,
                         _ => r#"{"jsonrpc":"2.0","result":{"method":"ok"},"id":"1"}"#,
                     };
@@ -72,10 +73,7 @@ async fn start_mock_signal_cli_server(addr: &str) -> String {
 }
 
 /// Start a carapace server that enforces signal-cli policy
-async fn start_carapace_server(
-    listener_addr: &str,
-    upstream_url: &str,
-) -> String {
+async fn start_carapace_server(listener_addr: &str, upstream_url: &str) -> String {
     let listener = TcpListener::bind(listener_addr)
         .await
         .expect("Failed to bind carapace server");
@@ -86,7 +84,11 @@ async fn start_carapace_server(
     // Create signal-cli policy with version and send methods allowed
     let http_policy = HttpPolicy {
         upstream: upstream_url.to_string(),
-        jsonrpc_allow_methods: vec!["version".to_string(), "send".to_string(), "sendTyping".to_string()],
+        jsonrpc_allow_methods: vec![
+            "version".to_string(),
+            "send".to_string(),
+            "sendTyping".to_string(),
+        ],
         jsonrpc_deny_methods: vec![],
         jsonrpc_param_filters: HashMap::new(),
         rate_limit: None,
@@ -98,8 +100,14 @@ async fn start_carapace_server(
     tools.insert("signal-cli".to_string(), ToolPolicy::Http(http_policy));
     let policy = PolicyConfig { tools };
 
-    let http_dispatcher = Arc::new(carapace_server::http_dispatch::HttpDispatcher::with_policy(policy));
-    let cli_dispatcher = Arc::new(carapace_server::cli_dispatch::CliDispatcher::with_policy(PolicyConfig { tools: HashMap::new() }));
+    let http_dispatcher = Arc::new(carapace_server::http_dispatch::HttpDispatcher::with_policy(
+        policy,
+    ));
+    let cli_dispatcher = Arc::new(carapace_server::cli_dispatch::CliDispatcher::with_policy(
+        PolicyConfig {
+            tools: HashMap::new(),
+        },
+    ));
 
     tokio::spawn(async move {
         while let Ok((socket, _)) = listener.accept().await {
@@ -117,8 +125,12 @@ async fn start_carapace_server(
                     if let Ok(msg) = result {
                         let response: Option<Message> = match msg {
                             Message::HttpRequest(req) => {
-                                match http_dispatcher_clone.dispatch_http(req.clone()).await {
-                                    Ok(resp) => Some(Message::HttpResponse(resp)),
+                                match http_dispatcher_clone.dispatch_http(req.clone(), None).await {
+                                    Ok(Some(resp)) => Some(Message::HttpResponse(resp)),
+                                    Ok(None) => {
+                                        // SSE streaming - events already sent through channel
+                                        None
+                                    }
                                     Err(e) => {
                                         eprintln!("HTTP dispatch error: {}", e);
                                         Some(Message::Error(carapace_protocol::ErrorMessage {
@@ -132,11 +144,13 @@ async fn start_carapace_server(
                             Message::CliRequest(req) => {
                                 match cli_dispatcher_clone.dispatch_cli(req.clone()).await {
                                     Ok(resp) => Some(Message::CliResponse(resp)),
-                                    Err(e) => Some(Message::Error(carapace_protocol::ErrorMessage {
-                                        id: Some(req.id),
-                                        code: "cli_error".to_string(),
-                                        message: format!("{}", e),
-                                    })),
+                                    Err(e) => {
+                                        Some(Message::Error(carapace_protocol::ErrorMessage {
+                                            id: Some(req.id),
+                                            code: "cli_error".to_string(),
+                                            message: format!("{}", e),
+                                        }))
+                                    }
                                 }
                             }
                             _ => None,
@@ -158,7 +172,6 @@ async fn start_carapace_server(
 
     server_url
 }
-
 
 #[tokio::test]
 #[ignore] // Run with: cargo test --test e2e_signal_cli_test -- --ignored --nocapture

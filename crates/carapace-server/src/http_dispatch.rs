@@ -35,7 +35,10 @@ impl HttpDispatcher {
         req: HttpRequest,
         sse_event_tx: Option<tokio::sync::mpsc::UnboundedSender<Message>>,
     ) -> anyhow::Result<Option<HttpResponse>> {
-        eprintln!("DEBUG: http_dispatch.dispatch_http() called for tool={}, method={}, path={}", req.tool, req.method, req.path);
+        eprintln!(
+            "DEBUG: http_dispatch.dispatch_http() called for tool={}, method={}, path={}",
+            req.tool, req.method, req.path
+        );
 
         // Check if tool is allowed in policy
         let tool_config = self
@@ -97,8 +100,13 @@ impl HttpDispatcher {
         }
 
         // Send request to upstream
-        eprintln!("DEBUG: About to call proxy_to_upstream for {}", http_policy.upstream);
-        let response = self.proxy_to_upstream(http_policy, &req, sse_event_tx).await?;
+        eprintln!(
+            "DEBUG: About to call proxy_to_upstream for {}",
+            http_policy.upstream
+        );
+        let response = self
+            .proxy_to_upstream(http_policy, &req, sse_event_tx)
+            .await?;
         eprintln!("DEBUG: proxy_to_upstream returned successfully");
 
         Ok(response)
@@ -154,17 +162,19 @@ impl HttpDispatcher {
         };
 
         // Send request with timeout
-        eprintln!("DEBUG: About to send HTTP request with {} second timeout", timeout_duration.as_secs());
-        let response = tokio::time::timeout(
-            timeout_duration,
-            request_builder.send(),
-        )
-        .await;
+        eprintln!(
+            "DEBUG: About to send HTTP request with {} second timeout",
+            timeout_duration.as_secs()
+        );
+        let response = tokio::time::timeout(timeout_duration, request_builder.send()).await;
 
         match &response {
             Ok(Ok(r)) => eprintln!("DEBUG: HTTP request completed, got status: {}", r.status()),
             Ok(Err(e)) => eprintln!("DEBUG: HTTP request failed: {}", e),
-            Err(_) => eprintln!("DEBUG: HTTP request timed out after {} seconds", timeout_duration.as_secs()),
+            Err(_) => eprintln!(
+                "DEBUG: HTTP request timed out after {} seconds",
+                timeout_duration.as_secs()
+            ),
         }
 
         let response = response??;
@@ -198,7 +208,7 @@ impl HttpDispatcher {
                             // SSE format: "event: type\ndata: json_value\n\n"
                             // Process complete events (delimited by \n\n)
                             while let Some(end_pos) = buffer.find("\n\n") {
-                                let event_block = buffer[..end_pos].to_string();  // Clone to avoid borrow issues
+                                let event_block = buffer[..end_pos].to_string(); // Clone to avoid borrow issues
                                 buffer = buffer[end_pos + 2..].to_string();
 
                                 // Parse SSE headers
@@ -231,7 +241,7 @@ impl HttpDispatcher {
                                 // UnboundedSender::send() never blocks
                                 if let Err(e) = tx.send(sse_msg) {
                                     eprintln!("DEBUG: SSE client disconnected: {}", e);
-                                    return Ok(None);  // Client gone, exit
+                                    return Ok(None); // Client gone, exit
                                 }
                             }
                         }
@@ -248,14 +258,11 @@ impl HttpDispatcher {
             } else {
                 // Fallback: no sender provided (shouldn't happen with listener.rs properly set up)
                 eprintln!("DEBUG: SSE endpoint but sse_event_tx is None - using 2-second fallback");
-                tokio::time::timeout(
-                    std::time::Duration::from_secs(2),
-                    response.text(),
-                )
-                .await
-                .ok()
-                .and_then(|r| r.ok())
-                .or(Some(String::new()))
+                tokio::time::timeout(std::time::Duration::from_secs(2), response.text())
+                    .await
+                    .ok()
+                    .and_then(|r| r.ok())
+                    .or(Some(String::new()))
             }
         } else {
             // Regular (non-SSE) endpoints: buffer normally
@@ -264,16 +271,12 @@ impl HttpDispatcher {
         };
 
         // Return HttpResponse wrapper or None for SSE
-        Ok(if let Some(body) = body {
-            Some(HttpResponse {
-                id: req.id.clone(),
-                status,
-                headers,
-                body: Some(body),
-            })
-        } else {
-            None  // SSE was streamed through sse_event_tx
-        })
+        Ok(body.map(|body| HttpResponse {
+            id: req.id.clone(),
+            status,
+            headers,
+            body: Some(body),
+        }))
     }
 }
 

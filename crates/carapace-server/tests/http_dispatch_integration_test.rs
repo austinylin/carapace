@@ -102,11 +102,11 @@ async fn test_http_dispatch_allowed_request() {
     };
 
     // Dispatch request
-    let response = dispatcher.dispatch_http(http_req).await;
+    let response = dispatcher.dispatch_http(http_req, None).await;
 
     // Verify response is successful
     assert!(response.is_ok());
-    let http_resp = response.unwrap();
+    let http_resp = response.unwrap().unwrap();
     assert_eq!(http_resp.status, 200);
     assert!(http_resp.body.is_some());
     assert!(http_resp
@@ -150,7 +150,7 @@ async fn test_http_dispatch_denied_method() {
     };
 
     // Dispatch should fail policy validation
-    let response = dispatcher.dispatch_http(http_req).await;
+    let response = dispatcher.dispatch_http(http_req, None).await;
 
     assert!(response.is_err());
     let err_msg = response.unwrap_err().to_string();
@@ -194,7 +194,7 @@ async fn test_http_dispatch_tool_not_in_policy() {
     };
 
     // Dispatch should fail because tool is not in policy
-    let response = dispatcher.dispatch_http(http_req).await;
+    let response = dispatcher.dispatch_http(http_req, None).await;
 
     assert!(response.is_err());
     assert!(response
@@ -237,11 +237,11 @@ async fn test_http_dispatch_preserves_request_path() {
     };
 
     // Dispatch request
-    let response = dispatcher.dispatch_http(http_req).await;
+    let response = dispatcher.dispatch_http(http_req, None).await;
 
     // Verify response contains the path we requested
     assert!(response.is_ok());
-    let http_resp = response.unwrap();
+    let http_resp = response.unwrap().unwrap();
     let body = http_resp.body.unwrap();
 
     // The mock server echoes back the path it received
@@ -293,7 +293,7 @@ async fn test_http_dispatch_with_json_rpc_param_filtering() {
     };
 
     // Should succeed
-    assert!(dispatcher.dispatch_http(allowed_req).await.is_ok());
+    assert!(dispatcher.dispatch_http(allowed_req, None).await.is_ok());
 
     // Request with blocked phone number
     let blocked_req = HttpRequest {
@@ -308,6 +308,6 @@ async fn test_http_dispatch_with_json_rpc_param_filtering() {
     };
 
     // Should fail policy validation (number not in allow list)
-    let response = dispatcher.dispatch_http(blocked_req).await;
+    let response = dispatcher.dispatch_http(blocked_req, None).await;
     assert!(response.is_err());
 }

@@ -9,19 +9,15 @@
 ///
 /// If this test passes, the system works end-to-end.
 /// If it fails, we've reproduced the production issue locally.
-
-use carapace_agent::{Connection, HttpProxy, Multiplexer};
+use carapace_agent::{Connection, Multiplexer};
 use carapace_policy::{HttpPolicy, PolicyConfig, ToolPolicy};
 use carapace_protocol::{Message, MessageCodec};
-use carapace_server::{
-    cli_dispatch::CliDispatcher,
-    http_dispatch::HttpDispatcher,
-};
+use carapace_server::{cli_dispatch::CliDispatcher, http_dispatch::HttpDispatcher};
 use futures::{SinkExt, StreamExt};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpListener;
 use tokio_util::codec::{FramedRead, FramedWrite};
 
 /// Start a mock signal-cli server that responds to JSON-RPC calls
@@ -38,9 +34,10 @@ async fn start_mock_signal_cli() -> String {
             tokio::spawn(async move {
                 let mut buf = vec![0; 4096];
                 if let Ok(n) = socket.read(&mut buf).await {
-                    let request = String::from_utf8_lossy(&buf[..n]);
+                    let _request = String::from_utf8_lossy(&buf[..n]);
 
-                    let response_body = r#"{"jsonrpc":"2.0","result":{"version":"0.13.24"},"id":"1"}"#;
+                    let response_body =
+                        r#"{"jsonrpc":"2.0","result":{"version":"0.13.24"},"id":"1"}"#;
                     let response = format!(
                         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
                         response_body.len(),
@@ -56,7 +53,9 @@ async fn start_mock_signal_cli() -> String {
 }
 
 /// Start the Carapace server with signal-cli policy
-async fn start_carapace_server(upstream: &str) -> (String, Arc<HttpDispatcher>, Arc<CliDispatcher>) {
+async fn start_carapace_server(
+    upstream: &str,
+) -> (String, Arc<HttpDispatcher>, Arc<CliDispatcher>) {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("Failed to bind carapace server");
@@ -107,7 +106,9 @@ async fn start_carapace_server(upstream: &str) -> (String, Arc<HttpDispatcher>, 
                                     eprintln!("Server: Processing HttpRequest id={}", req.id);
                                     match http_dispatcher.dispatch_http(req.clone(), None).await {
                                         Ok(Some(resp)) => {
-                                            eprintln!("Server: HttpRequest succeeded, sending response");
+                                            eprintln!(
+                                                "Server: HttpRequest succeeded, sending response"
+                                            );
                                             Some(Message::HttpResponse(resp))
                                         }
                                         Ok(None) => {
@@ -127,11 +128,13 @@ async fn start_carapace_server(upstream: &str) -> (String, Arc<HttpDispatcher>, 
                                 Message::CliRequest(req) => {
                                     match cli_dispatcher.dispatch_cli(req.clone()).await {
                                         Ok(resp) => Some(Message::CliResponse(resp)),
-                                        Err(e) => Some(Message::Error(carapace_protocol::ErrorMessage {
-                                            id: Some(req.id),
-                                            code: "error".to_string(),
-                                            message: format!("{}", e),
-                                        })),
+                                        Err(e) => {
+                                            Some(Message::Error(carapace_protocol::ErrorMessage {
+                                                id: Some(req.id),
+                                                code: "error".to_string(),
+                                                message: format!("{}", e),
+                                            }))
+                                        }
                                     }
                                 }
                                 _ => None,
@@ -188,12 +191,18 @@ async fn test_full_integration_signal_cli() {
         if parts.len() != 2 {
             panic!("Invalid server address: {}", server_addr);
         }
-        (parts[0].to_string(), parts[1].parse::<u16>().expect("Invalid port"))
+        (
+            parts[0].to_string(),
+            parts[1].parse::<u16>().expect("Invalid port"),
+        )
     };
     eprintln!("   Connecting to server at {}:{}", host, port);
 
-    let connection = Arc::new(Connection::connect_tcp_with_config(&host, port, 3, 100).await
-        .expect("Failed to connect agent to server"));
+    let connection = Arc::new(
+        Connection::connect_tcp_with_config(&host, port, 3, 100)
+            .await
+            .expect("Failed to connect agent to server"),
+    );
     eprintln!("   Carapace agent connected to server");
 
     // Spawn background task to handle responses from server
@@ -248,10 +257,7 @@ async fn test_full_integration_signal_cli() {
 
     // 5. Wait for response with timeout
     eprintln!("   Waiting for response...");
-    let response_result = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        rx.recv()
-    ).await;
+    let response_result = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv()).await;
 
     eprintln!("\n=== Test Results ===");
     match response_result {

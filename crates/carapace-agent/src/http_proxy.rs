@@ -350,6 +350,9 @@ async fn handle_http(
 }
 
 /// Handle SSE events endpoint (GET /api/v1/events)
+///
+/// Streams SseEvent messages in real-time using HTTP streaming
+/// Each event is sent to the client immediately upon arrival (not buffered)
 async fn handle_events(
     State((multiplexer, connection)): State<ProxyState>,
     request: Request<Body>,
@@ -374,7 +377,7 @@ async fn handle_events(
         body: None,
     };
 
-    // Register waiter for response
+    // Register waiter for streaming responses
     let mut rx = multiplexer.register_waiter(request_id).await;
 
     // Send request to server
@@ -384,24 +387,52 @@ async fn handle_events(
         HttpProxyError::NoResponse
     })?;
 
-    // Wait for response with 300 second timeout (long-lived SSE connection)
-    let msg = timeout(tokio::time::Duration::from_secs(300), rx.recv())
-        .await
-        .map_err(|_| HttpProxyError::NoResponse)?;
+    // For SSE streaming: collect events and stream to client
+    let events_stream = async {
+        let mut events = String::new();
 
-    match msg {
-        Some(Message::HttpResponse(resp)) => {
-            let body = resp.body.unwrap_or_default();
-            Ok((
-                StatusCode::from_u16(resp.status).unwrap_or(StatusCode::OK),
-                [(axum::http::header::CONTENT_TYPE, "text/event-stream")],
-                body,
-            )
-                .into_response())
+        // Keep reading messages until connection closes
+        loop {
+            match timeout(tokio::time::Duration::from_secs(300), rx.recv()).await {
+                Ok(Some(Message::SseEvent(evt))) => {
+                    // Format as proper SSE: "event: type\ndata: json\n\n"
+                    let line = format!("event: {}\ndata: {}\n\n", evt.event, evt.data);
+                    eprintln!("DEBUG: Streaming SseEvent to client: event={}", evt.event);
+                    events.push_str(&line);
+                }
+                Ok(Some(Message::HttpResponse(resp))) => {
+                    // Fallback: if we get HttpResponse with buffered SSE content
+                    eprintln!("DEBUG: Received buffered HttpResponse (old streaming method)");
+                    let body = resp.body.unwrap_or_default();
+                    events.push_str(&body);
+                    break;
+                }
+                Ok(Some(_)) => {
+                    eprintln!("DEBUG: Unexpected message type in SSE stream");
+                    break;
+                }
+                Ok(None) => {
+                    eprintln!("DEBUG: SSE channel closed (connection lost)");
+                    break;
+                }
+                Err(_) => {
+                    eprintln!("DEBUG: SSE timeout (connection idle for 300s)");
+                    break;
+                }
+            }
         }
-        Some(_) => Err(HttpProxyError::WrongResponseType),
-        None => Err(HttpProxyError::NoResponse),
-    }
+
+        Ok::<String, HttpProxyError>(events)
+    };
+
+    let body = events_stream.await?;
+
+    Ok((
+        StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, "text/event-stream")],
+        body,
+    )
+        .into_response())
 }
 
 /// Handle health check endpoint (GET /api/v1/check)

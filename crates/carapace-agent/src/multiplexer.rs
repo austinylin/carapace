@@ -28,7 +28,7 @@ impl Multiplexer {
     /// - Single message for HTTP requests
     /// - Multiple SseEvent messages for SSE streaming
     pub async fn register_waiter(&self, id: String) -> mpsc::Receiver<Message> {
-        let (tx, rx) = mpsc::channel(100);  // Buffer up to 100 messages per request
+        let (tx, rx) = mpsc::channel(100); // Buffer up to 100 messages per request
         self.waiters.lock().await.insert(id, tx);
         rx
     }
@@ -170,11 +170,9 @@ mod tests {
                 m.handle_response(resp).await;
 
                 // Receive it
-                if let Some(msg) = rx.recv().await {
-                    if let Message::Error(err) = msg {
-                        assert_eq!(err.message, format!("response-{}", i));
-                        return true;
-                    }
+                if let Some(Message::Error(err)) = rx.recv().await {
+                    assert_eq!(err.message, format!("response-{}", i));
+                    return true;
                 }
                 false
             });
@@ -235,7 +233,10 @@ mod tests {
 
         // Waiter should detect the disconnect
         let result = rx.recv().await;
-        assert!(result.is_none(), "Channel should be closed after disconnect");
+        assert!(
+            result.is_none(),
+            "Channel should be closed after disconnect"
+        );
 
         assert_eq!(multiplexer.pending_count().await, 0);
     }

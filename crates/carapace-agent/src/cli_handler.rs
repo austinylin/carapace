@@ -110,7 +110,7 @@ impl CliHandler {
             .map_err(|_| {
                 crate::error::AgentError::RequestTimeout("CLI request timeout".to_string())
             })?
-            .ok_or_else(|| crate::error::AgentError::RequestNotFound(id))?;
+            .ok_or(crate::error::AgentError::RequestNotFound(id))?;
 
         // Send response back to client
         let json = serde_json::to_vec(&response)?;

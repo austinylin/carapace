@@ -12,14 +12,10 @@
 /// - signal-cli HTTP API documentation
 /// - OpenClaw TypeScript integration code
 /// - Real production request/response patterns
-
 use carapace_agent::{Connection, Multiplexer};
-use carapace_policy::{HttpPolicy, PolicyConfig, ParamFilter, ToolPolicy};
+use carapace_policy::{HttpPolicy, ParamFilter, PolicyConfig, ToolPolicy};
 use carapace_protocol::{Message, MessageCodec};
-use carapace_server::{
-    cli_dispatch::CliDispatcher,
-    http_dispatch::HttpDispatcher,
-};
+use carapace_server::{cli_dispatch::CliDispatcher, http_dispatch::HttpDispatcher};
 use futures::{SinkExt, StreamExt};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -69,7 +65,14 @@ impl MockSignalCli {
                                         // Route to appropriate handler
                                         if request.contains("GET /api/v1/events") {
                                             // SSE is special - write events and close connection
-                                            if socket.write_all(MockSignalCli::handle_events_request(&request).as_bytes()).await.is_err() {
+                                            if socket
+                                                .write_all(
+                                                    MockSignalCli::handle_events_request(&request)
+                                                        .as_bytes(),
+                                                )
+                                                .await
+                                                .is_err()
+                                            {
                                                 break;
                                             }
                                             // For SSE, close connection after sending events (simulates stream ending)
@@ -82,7 +85,8 @@ impl MockSignalCli {
                                                 MockSignalCli::handle_default_request()
                                             };
 
-                                            if socket.write_all(response.as_bytes()).await.is_err() {
+                                            if socket.write_all(response.as_bytes()).await.is_err()
+                                            {
                                                 break;
                                             }
                                         }
@@ -97,9 +101,7 @@ impl MockSignalCli {
             }
         });
 
-        MockSignalCli {
-            addr: server_url,
-        }
+        MockSignalCli { addr: server_url }
     }
 
     fn handle_rpc_request(request: &str) -> String {
@@ -125,7 +127,9 @@ impl MockSignalCli {
             format!(r#"{{"jsonrpc":"2.0","result":{{"timestamp":1707920000000}},"id":"{id}"}}"#)
         } else {
             // Unknown method - return JSON-RPC error per spec
-            format!(r#"{{"jsonrpc":"2.0","error":{{"code":-32601,"message":"Method not found"}},"id":"{id}"}}"#)
+            format!(
+                r#"{{"jsonrpc":"2.0","error":{{"code":-32601,"message":"Method not found"}},"id":"{id}"}}"#
+            )
         };
 
         format!(
@@ -171,7 +175,8 @@ impl MockSignalCli {
     }
 
     fn handle_default_request() -> String {
-        "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\n\r\n{\"error\":\"Not found\"}".to_string()
+        "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\n\r\n{\"error\":\"Not found\"}"
+            .to_string()
     }
 }
 
@@ -274,25 +279,25 @@ async fn start_carapace_server(upstream: &str) -> (String, Arc<HttpDispatcher>) 
                                             eprintln!("SSE streaming response");
                                             None
                                         }
-                                        Err(e) => Some(Message::Error(
-                                            carapace_protocol::ErrorMessage {
+                                        Err(e) => {
+                                            Some(Message::Error(carapace_protocol::ErrorMessage {
                                                 id: Some(req.id),
                                                 code: "error".to_string(),
                                                 message: format!("{}", e),
-                                            },
-                                        )),
+                                            }))
+                                        }
                                     }
                                 }
                                 Message::CliRequest(req) => {
                                     match cli_dispatcher.dispatch_cli(req.clone()).await {
                                         Ok(resp) => Some(Message::CliResponse(resp)),
-                                        Err(e) => Some(Message::Error(
-                                            carapace_protocol::ErrorMessage {
+                                        Err(e) => {
+                                            Some(Message::Error(carapace_protocol::ErrorMessage {
                                                 id: Some(req.id),
                                                 code: "error".to_string(),
                                                 message: format!("{}", e),
-                                            },
-                                        )),
+                                            }))
+                                        }
                                     }
                                 }
                                 _ => None,
@@ -381,11 +386,7 @@ async fn test_openclaw_send_message() {
         .await
         .expect("Failed to send");
 
-    let response_result = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        rx.recv(),
-    )
-    .await;
+    let response_result = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv()).await;
 
     match response_result {
         Ok(Some(Message::HttpResponse(resp))) => {
@@ -393,8 +394,15 @@ async fn test_openclaw_send_message() {
             assert_eq!(resp.status, 200);
             assert!(resp.body.is_some());
             let body = resp.body.unwrap();
-            assert!(body.contains("timestamp"), "Expected timestamp in response: {}", body);
-            assert!(body.contains("550e8400-e29b-41d4-a716-446655440000"), "Expected UUID ID echoed back");
+            assert!(
+                body.contains("timestamp"),
+                "Expected timestamp in response: {}",
+                body
+            );
+            assert!(
+                body.contains("550e8400-e29b-41d4-a716-446655440000"),
+                "Expected UUID ID echoed back"
+            );
         }
         _ => panic!("Did not receive expected response"),
     }
@@ -464,11 +472,7 @@ async fn test_openclaw_send_typing_indicator() {
         .await
         .expect("Failed to send");
 
-    let response_result = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        rx.recv(),
-    )
-    .await;
+    let response_result = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv()).await;
 
     match response_result {
         Ok(Some(Message::HttpResponse(resp))) => {
@@ -537,11 +541,7 @@ async fn test_openclaw_receive_events_sse() {
         .await
         .expect("Failed to send");
 
-    let response_result = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        rx.recv(),
-    )
-    .await;
+    let response_result = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv()).await;
 
     match response_result {
         Ok(Some(Message::HttpResponse(resp))) => {
@@ -622,11 +622,7 @@ async fn test_openclaw_blocked_number() {
         .await
         .expect("Failed to send");
 
-    let response_result = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        rx.recv(),
-    )
-    .await;
+    let response_result = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv()).await;
 
     match response_result {
         Ok(Some(Message::Error(err))) => {
@@ -701,9 +697,10 @@ async fn test_openclaw_concurrent_requests() {
                     h
                 },
                 // Real OpenClaw version request format
-                body: Some(
-                    format!(r#"{{"jsonrpc":"2.0","id":"{}","method":"version","params":{{}}}}"#, request_id),
-                ),
+                body: Some(format!(
+                    r#"{{"jsonrpc":"2.0","id":"{}","method":"version","params":{{}}}}"#,
+                    request_id
+                )),
             };
 
             conn.send(Message::HttpRequest(http_req))

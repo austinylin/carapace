@@ -6,7 +6,6 @@
 /// 3. Routing responses back to the waiting handler
 ///
 /// If this doesn't work, HTTP handlers will timeout waiting for responses.
-
 use carapace_agent::Multiplexer;
 use carapace_protocol::{HttpResponse, Message};
 use std::collections::HashMap;
@@ -27,15 +26,17 @@ async fn test_multiplexer_registers_waiter() {
     };
 
     // Handle response should route it to the waiter
-    multiplexer.handle_response(Message::HttpResponse(response)).await;
+    multiplexer
+        .handle_response(Message::HttpResponse(response))
+        .await;
 
     // The waiter should receive the response
-    let result = tokio::time::timeout(
-        std::time::Duration::from_secs(1),
-        rx.recv()
-    ).await;
+    let result = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv()).await;
 
-    assert!(result.is_ok(), "Waiter should receive response within 1 second");
+    assert!(
+        result.is_ok(),
+        "Waiter should receive response within 1 second"
+    );
 
     let msg = result.unwrap();
     match msg {
@@ -63,20 +64,16 @@ async fn test_multiplexer_routes_correct_response() {
         headers: HashMap::new(),
         body: Some("response-2".to_string()),
     };
-    multiplexer.handle_response(Message::HttpResponse(response_2)).await;
+    multiplexer
+        .handle_response(Message::HttpResponse(response_2))
+        .await;
 
     // rx2 should get it
-    let result2 = tokio::time::timeout(
-        std::time::Duration::from_millis(100),
-        rx2.recv()
-    ).await;
+    let result2 = tokio::time::timeout(std::time::Duration::from_millis(100), rx2.recv()).await;
     assert!(result2.is_ok(), "rx2 should receive response-2");
 
     // rx1 should NOT get it (should timeout)
-    let result1 = tokio::time::timeout(
-        std::time::Duration::from_millis(100),
-        rx1.recv()
-    ).await;
+    let result1 = tokio::time::timeout(std::time::Duration::from_millis(100), rx1.recv()).await;
     assert!(result1.is_err(), "rx1 should not receive response-2");
 }
 
@@ -104,10 +101,7 @@ async fn test_multiplexer_concurrent_requests() {
             mux.handle_response(Message::HttpResponse(response)).await;
 
             // Wait for response
-            tokio::time::timeout(
-                std::time::Duration::from_secs(1),
-                rx.recv()
-            ).await
+            tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv()).await
         });
 
         handles.push(handle);
@@ -117,6 +111,9 @@ async fn test_multiplexer_concurrent_requests() {
     for handle in handles {
         let result = handle.await;
         assert!(result.is_ok(), "Task should complete without panicking");
-        assert!(result.unwrap().is_ok(), "Should receive response within timeout");
+        assert!(
+            result.unwrap().is_ok(),
+            "Should receive response within timeout"
+        );
     }
 }
