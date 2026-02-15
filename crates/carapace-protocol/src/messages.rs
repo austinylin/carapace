@@ -22,7 +22,7 @@ impl Message {
             Message::CliResponse(res) => Some(&res.id),
             Message::HttpRequest(req) => Some(&req.id),
             Message::HttpResponse(res) => Some(&res.id),
-            Message::SseEvent(_) => None,
+            Message::SseEvent(evt) => Some(&evt.id),
             Message::Error(err) => err.id.as_deref(),
         }
     }
@@ -71,9 +71,10 @@ pub struct HttpResponse {
     pub body: Option<String>,
 }
 
-/// Server-sent event from upstream
+/// Server-sent event from upstream (streamed incrementally for SSE endpoints)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SseEvent {
+    pub id: RequestId,  // Correlates to HttpRequest.id for streaming responses
     pub tool: String,
     pub event: String,
     pub data: String,
@@ -200,14 +201,33 @@ mod tests {
     }
 
     #[test]
-    fn test_sse_event_no_id() {
+    fn test_sse_event_with_id_correlation() {
         let event = Message::SseEvent(SseEvent {
+            id: "sse-request-123".to_string(),
             tool: "signal-cli".to_string(),
             event: "message".to_string(),
-            data: r#"{"from":"+15551234567"}"#.to_string(),
+            data: r#"{"from":"+15551234567","body":"Hello"}"#.to_string(),
         });
 
-        assert_eq!(event.id(), None);
+        // SseEvent now has an id for request correlation
+        assert_eq!(event.id(), Some("sse-request-123"));
+    }
+
+    #[test]
+    fn test_sse_event_serialization_with_id() {
+        let event = SseEvent {
+            id: "stream-001".to_string(),
+            tool: "signal-cli".to_string(),
+            event: "message".to_string(),
+            data: r#"{"type":"message","sender":"+15551234567"}"#.to_string(),
+        };
+
+        let json = serde_json::to_string(&event).expect("serialization failed");
+        assert!(json.contains("\"id\":\"stream-001\""));
+
+        let deserialized: SseEvent = serde_json::from_str(&json).expect("deserialization failed");
+        assert_eq!(deserialized.id, "stream-001");
+        assert_eq!(deserialized.tool, "signal-cli");
     }
 
     #[test]

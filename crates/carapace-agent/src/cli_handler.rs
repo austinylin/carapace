@@ -98,19 +98,19 @@ impl CliHandler {
         };
 
         // Register waiter for response
-        let rx = multiplexer.register_waiter(id.clone()).await;
+        let mut rx = multiplexer.register_waiter(id.clone()).await;
 
         // Send request to server via SSH connection
         let msg = Message::CliRequest(cli_req);
         connection.send(msg).await?;
 
         // Wait for response (with timeout)
-        let response = tokio::time::timeout(tokio::time::Duration::from_secs(30), rx)
+        let response = tokio::time::timeout(tokio::time::Duration::from_secs(30), rx.recv())
             .await
             .map_err(|_| {
                 crate::error::AgentError::RequestTimeout("CLI request timeout".to_string())
             })?
-            .map_err(|_| crate::error::AgentError::RequestNotFound(id))?;
+            .ok_or_else(|| crate::error::AgentError::RequestNotFound(id))?;
 
         // Send response back to client
         let json = serde_json::to_vec(&response)?;

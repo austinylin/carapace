@@ -114,7 +114,7 @@ async fn handle_rpc(
     };
 
     // Register waiter for response
-    let rx = multiplexer.register_waiter(request_id).await;
+    let mut rx = multiplexer.register_waiter(request_id).await;
 
     // Send request to server via SSH connection
     let msg = Message::HttpRequest(http_req);
@@ -124,13 +124,12 @@ async fn handle_rpc(
     })?;
 
     // Wait for response with 60 second timeout
-    // Note: For true streaming SSE, server should send SseEvent messages instead of buffering response
-    let response_result = timeout(tokio::time::Duration::from_secs(60), rx)
+    let msg = timeout(tokio::time::Duration::from_secs(60), rx.recv())
         .await
         .map_err(|_| HttpProxyError::NoResponse)?;
 
-    match response_result {
-        Ok(Message::HttpResponse(resp)) => {
+    match msg {
+        Some(Message::HttpResponse(resp)) => {
             // Check if this is an SSE response
             if is_sse_response(&resp.headers) {
                 // For SSE, body will be streamed line-by-line
@@ -160,8 +159,8 @@ async fn handle_rpc(
                     .into_response())
             }
         }
-        Ok(_) => Err(HttpProxyError::WrongResponseType),
-        Err(_) => Err(HttpProxyError::NoResponse),
+        Some(_) => Err(HttpProxyError::WrongResponseType),
+        None => Err(HttpProxyError::NoResponse),
     }
 }
 
@@ -217,7 +216,7 @@ async fn handle_api_v1_rpc(
     };
 
     // Register waiter for response
-    let rx = multiplexer.register_waiter(request_id).await;
+    let mut rx = multiplexer.register_waiter(request_id).await;
 
     // Send request to server via SSH connection
     let msg = Message::HttpRequest(http_req);
@@ -227,12 +226,12 @@ async fn handle_api_v1_rpc(
     })?;
 
     // Wait for response with 60 second timeout
-    let response_result = timeout(tokio::time::Duration::from_secs(60), rx)
+    let msg = timeout(tokio::time::Duration::from_secs(60), rx.recv())
         .await
         .map_err(|_| HttpProxyError::NoResponse)?;
 
-    match response_result {
-        Ok(Message::HttpResponse(resp)) => {
+    match msg {
+        Some(Message::HttpResponse(resp)) => {
             let body = resp.body.unwrap_or_default();
             Ok((
                 StatusCode::from_u16(resp.status).unwrap_or(StatusCode::OK),
@@ -240,8 +239,8 @@ async fn handle_api_v1_rpc(
             )
                 .into_response())
         }
-        Ok(_) => Err(HttpProxyError::WrongResponseType),
-        Err(_) => Err(HttpProxyError::NoResponse),
+        Some(_) => Err(HttpProxyError::WrongResponseType),
+        None => Err(HttpProxyError::NoResponse),
     }
 }
 
@@ -300,7 +299,7 @@ async fn handle_http(
     };
 
     // Register waiter for response
-    let rx = multiplexer.register_waiter(request_id).await;
+    let mut rx = multiplexer.register_waiter(request_id).await;
 
     // Send request to server via SSH connection
     let msg = Message::HttpRequest(http_req);
@@ -310,13 +309,12 @@ async fn handle_http(
     })?;
 
     // Wait for response with 60 second timeout
-    // Note: For true streaming SSE, server should send SseEvent messages instead of buffering response
-    let response_result = timeout(tokio::time::Duration::from_secs(60), rx)
+    let msg = timeout(tokio::time::Duration::from_secs(60), rx.recv())
         .await
         .map_err(|_| HttpProxyError::NoResponse)?;
 
-    match response_result {
-        Ok(Message::HttpResponse(resp)) => {
+    match msg {
+        Some(Message::HttpResponse(resp)) => {
             // Check if this is an SSE response
             if is_sse_response(&resp.headers) {
                 // For SSE, body will be streamed line-by-line
@@ -346,8 +344,8 @@ async fn handle_http(
                     .into_response())
             }
         }
-        Ok(_) => Err(HttpProxyError::WrongResponseType),
-        Err(_) => Err(HttpProxyError::NoResponse),
+        Some(_) => Err(HttpProxyError::WrongResponseType),
+        None => Err(HttpProxyError::NoResponse),
     }
 }
 
@@ -377,7 +375,7 @@ async fn handle_events(
     };
 
     // Register waiter for response
-    let rx = multiplexer.register_waiter(request_id).await;
+    let mut rx = multiplexer.register_waiter(request_id).await;
 
     // Send request to server
     let msg = Message::HttpRequest(http_req);
@@ -387,12 +385,12 @@ async fn handle_events(
     })?;
 
     // Wait for response with 300 second timeout (long-lived SSE connection)
-    let response_result = timeout(tokio::time::Duration::from_secs(300), rx)
+    let msg = timeout(tokio::time::Duration::from_secs(300), rx.recv())
         .await
         .map_err(|_| HttpProxyError::NoResponse)?;
 
-    match response_result {
-        Ok(Message::HttpResponse(resp)) => {
+    match msg {
+        Some(Message::HttpResponse(resp)) => {
             let body = resp.body.unwrap_or_default();
             Ok((
                 StatusCode::from_u16(resp.status).unwrap_or(StatusCode::OK),
@@ -401,8 +399,8 @@ async fn handle_events(
             )
                 .into_response())
         }
-        Ok(_) => Err(HttpProxyError::WrongResponseType),
-        Err(_) => Err(HttpProxyError::NoResponse),
+        Some(_) => Err(HttpProxyError::WrongResponseType),
+        None => Err(HttpProxyError::NoResponse),
     }
 }
 
@@ -494,7 +492,7 @@ async fn handle_fallback(
     };
 
     // Register waiter for response
-    let rx = multiplexer.register_waiter(request_id).await;
+    let mut rx = multiplexer.register_waiter(request_id).await;
 
     // Send request to server via connection
     let msg = Message::HttpRequest(http_req);
@@ -504,12 +502,12 @@ async fn handle_fallback(
     })?;
 
     // Wait for response with 60 second timeout
-    let response_result = timeout(tokio::time::Duration::from_secs(60), rx)
+    let msg = timeout(tokio::time::Duration::from_secs(60), rx.recv())
         .await
         .map_err(|_| HttpProxyError::NoResponse)?;
 
-    match response_result {
-        Ok(Message::HttpResponse(resp)) => {
+    match msg {
+        Some(Message::HttpResponse(resp)) => {
             let body = resp.body.unwrap_or_default();
             Ok((
                 StatusCode::from_u16(resp.status).unwrap_or(StatusCode::OK),
@@ -517,8 +515,8 @@ async fn handle_fallback(
             )
                 .into_response())
         }
-        Ok(_) => Err(HttpProxyError::WrongResponseType),
-        Err(_) => Err(HttpProxyError::NoResponse),
+        Some(_) => Err(HttpProxyError::WrongResponseType),
+        None => Err(HttpProxyError::NoResponse),
     }
 }
 
