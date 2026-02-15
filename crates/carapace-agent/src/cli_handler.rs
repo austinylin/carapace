@@ -122,7 +122,6 @@ impl CliHandler {
 
 #[cfg(test)]
 mod tests {
-    
 
     #[test]
     fn test_cli_handler_compilation() {

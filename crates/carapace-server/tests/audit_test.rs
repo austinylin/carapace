@@ -57,9 +57,11 @@ fn test_audit_log_policy_decision_logging() {
 #[test]
 fn test_audit_sensitive_data_redaction() {
     // Passwords and tokens should be redacted in logs
-    let argv_with_token = ["gh".to_string(),
+    let argv_with_token = [
+        "gh".to_string(),
         "--token".to_string(),
-        "ghp_secret123".to_string()];
+        "ghp_secret123".to_string(),
+    ];
 
     // Should redact tokens
     let redacted_argv = argv_with_token
@@ -288,7 +290,8 @@ fn test_audit_log_queryable() {
         policy_result: String,
     }
 
-    let logs = [QueryableLog {
+    let logs = [
+        QueryableLog {
             timestamp: "2026-02-12T10:00:00Z".to_string(),
             tool: "gh".to_string(),
             policy_result: "allow".to_string(),
@@ -297,7 +300,8 @@ fn test_audit_log_queryable() {
             timestamp: "2026-02-12T10:00:01Z".to_string(),
             tool: "gh".to_string(),
             policy_result: "deny".to_string(),
-        }];
+        },
+    ];
 
     // Filter by tool
     let gh_logs: Vec<_> = logs.iter().filter(|l| l.tool == "gh").collect();

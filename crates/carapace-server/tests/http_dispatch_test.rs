@@ -253,7 +253,8 @@ fn test_http_request_timeout() {
 #[test]
 fn test_concurrent_http_requests_isolation() {
     // Different concurrent requests shouldn't interfere
-    let reqs = [HttpRequest {
+    let reqs = [
+        HttpRequest {
             id: "req-1".to_string(),
             tool: "signal-cli".to_string(),
             method: "POST".to_string(),
@@ -268,7 +269,8 @@ fn test_concurrent_http_requests_isolation() {
             path: "/api".to_string(),
             headers: HashMap::new(),
             body: Some(r#"{"method":"receive"}"#.to_string()),
-        }];
+        },
+    ];
 
     assert_ne!(reqs[0].id, reqs[1].id);
     // Each request should maintain its own state

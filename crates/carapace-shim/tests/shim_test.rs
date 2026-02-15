@@ -228,10 +228,12 @@ fn test_tool_name_case_sensitivity() {
 #[test]
 fn test_argv_escaping_for_protocol() {
     // Arguments should be properly serialized for the protocol
-    let argv = ["tool",
+    let argv = [
+        "tool",
         "arg with spaces",
         "arg\twith\ttabs",
-        "arg\nwith\nnewlines"];
+        "arg\nwith\nnewlines",
+    ];
 
     // Each arg is kept separate in the array, not further escaped
     assert_eq!(argv.len(), 4);

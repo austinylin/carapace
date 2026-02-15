@@ -271,7 +271,6 @@ impl IntoResponse for HttpProxyError {
 
 #[cfg(test)]
 mod tests {
-    
 
     #[test]
     fn test_http_proxy_state_type() {
