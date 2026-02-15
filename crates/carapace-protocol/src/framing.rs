@@ -333,6 +333,8 @@ mod tests {
                 (Message::HttpRequest(_), Message::HttpRequest(_)) => {}
                 (Message::HttpResponse(_), Message::HttpResponse(_)) => {}
                 (Message::Error(_), Message::Error(_)) => {}
+                (Message::Ping(_), Message::Ping(_)) => {}
+                (Message::Pong(_), Message::Pong(_)) => {}
                 _ => panic!("Type mismatch"),
             }
         }

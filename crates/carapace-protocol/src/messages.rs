@@ -13,6 +13,8 @@ pub enum Message {
     HttpResponse(HttpResponse),
     SseEvent(SseEvent),
     Error(ErrorMessage),
+    Ping(PingPong),
+    Pong(PingPong),
 }
 
 impl Message {
@@ -24,6 +26,8 @@ impl Message {
             Message::HttpResponse(res) => Some(&res.id),
             Message::SseEvent(evt) => Some(&evt.id),
             Message::Error(err) => err.id.as_deref(),
+            Message::Ping(p) => Some(&p.id),
+            Message::Pong(p) => Some(&p.id),
         }
     }
 }
@@ -86,6 +90,13 @@ pub struct ErrorMessage {
     pub id: Option<RequestId>,
     pub code: String,
     pub message: String,
+}
+
+/// Ping/Pong keepalive message
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PingPong {
+    pub id: RequestId,
+    pub timestamp: u64,
 }
 
 #[cfg(test)]

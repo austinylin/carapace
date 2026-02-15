@@ -75,6 +75,18 @@ impl Listener {
         while let Some(result) = frame_read.next().await {
             match result {
                 Ok(msg) => {
+                    // Handle Ping immediately (don't dispatch)
+                    if let Message::Ping(ping) = &msg {
+                        let pong = Message::Pong(carapace_protocol::PingPong {
+                            id: ping.id.clone(),
+                            timestamp: ping.timestamp,
+                        });
+                        if let Err(e) = frame_write.lock().await.send(pong).await {
+                            tracing::error!("Failed to send Pong: {}", e);
+                        }
+                        continue;
+                    }
+
                     // Log what type of message we received
                     match &msg {
                         Message::CliRequest(_) => tracing::debug!("Received CliRequest message"),
@@ -84,7 +96,10 @@ impl Listener {
                             tracing::debug!("Received HttpResponse message")
                         }
                         Message::Error(_) => tracing::debug!("Received Error message"),
-                        Message::SseEvent { .. } => tracing::debug!("Received SseEvent message"),
+                        Message::SseEvent(_) => tracing::debug!("Received SseEvent message"),
+                        Message::Ping(_) | Message::Pong(_) => {
+                            tracing::debug!("Received Ping/Pong message")
+                        }
                     }
 
                     // Dispatch message, passing SSE channel
@@ -240,8 +255,10 @@ impl Listener {
             Message::CliResponse(_)
             | Message::Error(_)
             | Message::HttpResponse(_)
-            | Message::SseEvent { .. } => {
-                // Server should not receive these from client
+            | Message::SseEvent(_)
+            | Message::Ping(_)
+            | Message::Pong(_) => {
+                // Server should not receive these from client (Ping handled in listen loop)
                 tracing::warn!("Unexpected message type from client");
                 None
             }

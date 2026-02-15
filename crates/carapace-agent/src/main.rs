@@ -1,4 +1,5 @@
 use carapace_agent::{CliHandler, Connection, HttpProxy, Multiplexer, Result as AgentResult};
+use carapace_protocol::{Message, PingPong};
 use std::sync::Arc;
 
 #[tokio::main]
@@ -36,6 +37,11 @@ async fn main() -> AgentResult<()> {
         loop {
             match connection_read.recv().await {
                 Ok(Some(msg)) => {
+                    // Handle Pong silently (keepalive response, not a real message)
+                    if matches!(&msg, Message::Pong(_)) {
+                        tracing::trace!("Received Pong from server");
+                        continue;
+                    }
                     tracing::debug!("Received message from server");
                     multiplexer_response.handle_response(msg).await;
                 }
@@ -53,13 +59,19 @@ async fn main() -> AgentResult<()> {
         }
     });
 
-    // Spawn connection health monitor for automatic reconnection
+    // Spawn ping-based keepalive monitor (replaces simple is_healthy check)
+    // Sends a Ping message every 30 seconds; if send fails, connection is dead
     let connection_monitor = connection.clone();
     let server_host = config.server.host.clone();
     let server_port = config.server.port;
+    let ping_interval = std::env::var("CARAPACE_PING_INTERVAL_SECS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(30u64);
     tokio::spawn(async move {
+        let mut ping_counter: u64 = 0;
         loop {
-            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+            tokio::time::sleep(tokio::time::Duration::from_secs(ping_interval)).await;
 
             if !connection_monitor.is_healthy() {
                 tracing::warn!(
@@ -72,6 +84,23 @@ async fn main() -> AgentResult<()> {
                 } else {
                     tracing::info!("Auto-reconnection successful");
                 }
+                continue;
+            }
+
+            // Send Ping to verify connection is actually alive (not just locally marked healthy)
+            ping_counter += 1;
+            let ping = Message::Ping(PingPong {
+                id: format!("ping-{}", ping_counter),
+                timestamp: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs(),
+            });
+            if let Err(e) = connection_monitor.send(ping).await {
+                tracing::warn!("Ping failed (connection likely dead): {}", e);
+                // send() already marks connection unhealthy, reconnect will happen next iteration
+            } else {
+                tracing::trace!("Ping {} sent", ping_counter);
             }
         }
     });
