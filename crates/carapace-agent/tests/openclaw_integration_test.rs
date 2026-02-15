@@ -67,16 +67,24 @@ impl MockSignalCli {
                                         eprintln!("Mock signal-cli received:\n{}", request);
 
                                         // Route to appropriate handler
-                                        let response = if request.contains("POST /api/v1/rpc") {
-                                            MockSignalCli::handle_rpc_request(&request)
-                                        } else if request.contains("GET /api/v1/events") {
-                                            MockSignalCli::handle_events_request(&request)
-                                        } else {
-                                            MockSignalCli::handle_default_request()
-                                        };
-
-                                        if socket.write_all(response.as_bytes()).await.is_err() {
+                                        if request.contains("GET /api/v1/events") {
+                                            // SSE is special - write events and close connection
+                                            if socket.write_all(MockSignalCli::handle_events_request(&request).as_bytes()).await.is_err() {
+                                                break;
+                                            }
+                                            // For SSE, close connection after sending events (simulates stream ending)
+                                            drop(socket);
                                             break;
+                                        } else {
+                                            let response = if request.contains("POST /api/v1/rpc") {
+                                                MockSignalCli::handle_rpc_request(&request)
+                                            } else {
+                                                MockSignalCli::handle_default_request()
+                                            };
+
+                                            if socket.write_all(response.as_bytes()).await.is_err() {
+                                                break;
+                                            }
                                         }
                                     }
                                     Err(_) => break,
@@ -129,14 +137,34 @@ impl MockSignalCli {
 
     fn handle_events_request(_request: &str) -> String {
         // SSE response - stream of events
+        // Based on real signal-cli ServerSentEventSender format from:
+        // org/asamk/signal/http/ServerSentEventSender.java
+        //
+        // Format per HTML spec: https://html.spec.whatwg.org/multipage/server-sent-events.html
+        // Each event is:
+        //   id:event-id
+        //   event:event-type
+        //   data:json-data
+        //   <blank line>
+        //
+        // signal-cli JsonReceiveMessageHandler sends:
+        // {
+        //   "account": "+1234567890",
+        //   "envelope": { message details }
+        // }
+
         let events = vec![
-            "data: {\"type\":\"message\",\"source\":\"+12025551234\",\"text\":\"Hello from Signal\"}\n\n",
-            "data: {\"type\":\"message\",\"source\":\"+12025559999\",\"text\":\"Another message\"}\n\n",
+            // Event 1: Incoming message
+            "id:1\nevent:message\ndata:{\"account\":\"+12242120288\",\"envelope\":{\"timestamp\":1707920000000,\"source\":\"+12025551234\",\"sourceDevice\":1,\"message\":{\"body\":\"Hello from Signal\"},\"expirationTime\":0}}\n\n",
+            // Event 2: Keep-alive (colon at start means comment, receiver ignores it)
+            ":\n\n",
+            // Event 3: Another incoming message
+            "id:2\nevent:message\ndata:{\"account\":\"+12242120288\",\"envelope\":{\"timestamp\":1707920001000,\"source\":\"+12025559999\",\"sourceDevice\":1,\"message\":{\"body\":\"Another message\"},\"expirationTime\":0}}\n\n",
         ];
 
         let body = events.join("");
         format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
+            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nContent-Length: {}\r\n\r\n{}",
             body.len(),
             body
         )
