@@ -109,7 +109,7 @@ fn test_argv0_just_slash() {
 #[test]
 fn test_argv0_with_null_byte() {
     let argv0 = "gh\0hidden";
-    let tool_name = PathBuf::from(argv0)
+    let _tool_name = PathBuf::from(argv0)
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("unknown")
@@ -123,7 +123,7 @@ fn test_argv0_with_null_byte() {
 fn test_remaining_argv_preserved() {
     // If called as: gh pr list --all
     // argv[0] = gh, argv[1:] = [pr, list, --all]
-    let argv = vec!["gh", "pr", "list", "--all"];
+    let argv = ["gh", "pr", "list", "--all"];
 
     let tool = argv[0];
     let args = &argv[1..];
@@ -140,7 +140,7 @@ fn test_environment_preservation() {
         .collect::<Vec<_>>();
 
     // Should capture some env vars
-    assert!(env.len() > 0);
+    assert!(!env.is_empty());
 }
 
 #[test]
@@ -170,7 +170,7 @@ fn test_large_argv() {
 
 #[test]
 fn test_unicode_in_argv() {
-    let argv = vec!["issue", "create", "--title", "Test 你好 🎉"];
+    let argv = ["issue", "create", "--title", "Test 你好 🎉"];
     assert_eq!(argv[3], "Test 你好 🎉");
 }
 
@@ -228,12 +228,10 @@ fn test_tool_name_case_sensitivity() {
 #[test]
 fn test_argv_escaping_for_protocol() {
     // Arguments should be properly serialized for the protocol
-    let argv = vec![
-        "tool",
+    let argv = ["tool",
         "arg with spaces",
         "arg\twith\ttabs",
-        "arg\nwith\nnewlines",
-    ];
+        "arg\nwith\nnewlines"];
 
     // Each arg is kept separate in the array, not further escaped
     assert_eq!(argv.len(), 4);

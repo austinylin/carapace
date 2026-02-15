@@ -209,7 +209,7 @@ fn test_carriage_return_injection() {
 fn test_form_feed_character() {
     let ff = "arg\u{000C}cmd";
     // Form feed might not be in DANGEROUS_CHARS, check the implementation
-    let has_danger = PolicyValidator::has_dangerous_shell_chars(ff);
+    let _has_danger = PolicyValidator::has_dangerous_shell_chars(ff);
     // Form feed is not in our list, so it won't be caught, but that's okay
     // because it's not typically dangerous for shell injection
 }

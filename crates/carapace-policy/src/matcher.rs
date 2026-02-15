@@ -150,7 +150,7 @@ mod tests {
             ArgvMatcher::new(vec!["safe".to_string()], vec![]).expect("matcher creation failed");
 
         // Join will concatenate with spaces, so null bytes become visible
-        let argv_with_null = vec!["safe".to_string(), "command\0hidden".to_string()];
+        let argv_with_null = ["safe".to_string(), "command\0hidden".to_string()];
         // This should work - the matcher sees the full string
         let joined = argv_with_null.join(" ");
         assert!(joined.contains('\0'));

@@ -164,7 +164,7 @@ mod tests {
             serde_json::from_str(&json).expect("deserialization failed");
 
         assert_eq!(deserialized.method, "POST");
-        assert_eq!(deserialized.body.is_some(), true);
+        assert!(deserialized.body.is_some());
     }
 
     #[test]

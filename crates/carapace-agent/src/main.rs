@@ -103,10 +103,10 @@ async fn main() -> AgentResult<()> {
 
     // Set up signal handlers for graceful shutdown
     let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-        .map_err(|e| carapace_agent::error::AgentError::IOError(e))?;
+        .map_err(carapace_agent::error::AgentError::IOError)?;
 
     let mut sighup = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())
-        .map_err(|e| carapace_agent::error::AgentError::IOError(e))?;
+        .map_err(carapace_agent::error::AgentError::IOError)?;
 
     // Wait for shutdown signal
     tokio::select! {

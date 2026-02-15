@@ -120,7 +120,7 @@ mod tests {
         let mut buffer = BytesMut::new();
         codec.encode(msg, &mut buffer).expect("encode failed");
 
-        let total_len = buffer.len();
+        let _total_len = buffer.len();
 
         // Split buffer - keep only first 4 bytes (the length prefix)
         let mut partial = buffer.split_to(4);

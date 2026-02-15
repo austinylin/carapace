@@ -43,8 +43,8 @@ fn test_response_ordering() {
 #[test]
 fn test_orphaned_responses() {
     // Test detection of responses with no matching request
-    let requests = vec!["req-1", "req-2", "req-3"];
-    let response_ids = vec!["req-1", "req-2", "req-3", "req-999"]; // req-999 is orphaned
+    let requests = ["req-1", "req-2", "req-3"];
+    let response_ids = ["req-1", "req-2", "req-3", "req-999"]; // req-999 is orphaned
 
     let orphaned: Vec<_> = response_ids
         .iter()

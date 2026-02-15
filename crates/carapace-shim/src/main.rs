@@ -116,7 +116,7 @@ mod tests {
     #[test]
     fn test_agent_socket_path_default() {
         // Clear the env var if it exists, then get path
-        let _ = std::env::remove_var("CARAPACE_AGENT_SOCKET");
+        std::env::remove_var("CARAPACE_AGENT_SOCKET");
         let path = get_agent_socket_path();
         assert_eq!(path, "/tmp/carapace-agent.sock");
     }

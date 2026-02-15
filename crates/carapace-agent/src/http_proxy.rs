@@ -271,7 +271,7 @@ impl IntoResponse for HttpProxyError {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    
 
     #[test]
     fn test_http_proxy_state_type() {

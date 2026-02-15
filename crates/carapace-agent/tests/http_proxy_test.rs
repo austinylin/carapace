@@ -1,4 +1,4 @@
-use carapace_protocol::{HttpRequest, HttpResponse, Message};
+use carapace_protocol::{HttpRequest, HttpResponse};
 use std::collections::HashMap;
 
 #[test]

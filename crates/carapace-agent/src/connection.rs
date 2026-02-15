@@ -64,7 +64,7 @@ impl Connection {
                 Err(e) => {
                     if attempt < self.reconnect_attempts - 1 {
                         let backoff =
-                            self.reconnect_backoff_ms * (2_u64.pow(attempt as u32)).min(3600000);
+                            self.reconnect_backoff_ms * (2_u64.pow(attempt)).min(3600000);
                         tracing::warn!(
                             "Connection attempt {} failed, retrying in {}ms: {}",
                             attempt + 1,

@@ -1,4 +1,4 @@
-use carapace_policy::{ArgvMatcher, CliPolicy, PolicyConfig, ToolPolicy};
+use carapace_policy::{ArgvMatcher, PolicyConfig, ToolPolicy};
 use std::collections::HashMap;
 
 #[test]

@@ -1,4 +1,4 @@
-use carapace_protocol::{CliRequest, Message};
+use carapace_protocol::CliRequest;
 use std::collections::HashMap;
 
 #[test]
