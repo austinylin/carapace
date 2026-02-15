@@ -66,9 +66,7 @@ async fn handle_client(
         ("GET", "/debug/connections") => {
             create_json_response(handle_connections(&connection_tracker).await)
         }
-        ("GET", "/debug/audit") => create_json_response(handle_audit()),
-        ("POST", "/debug/policy") => create_json_response(handle_policy()),
-        _ => create_json_response(json!({"error": "Not found"})),
+        _ => create_not_found_response(path),
     };
 
     writer.write_all(response.as_bytes()).await?;
@@ -119,18 +117,12 @@ async fn handle_connections(connection_tracker: &ConnectionTracker) -> serde_jso
     })
 }
 
-/// Handle GET /debug/audit
-fn handle_audit() -> serde_json::Value {
-    json!({
-        "entries": [],
-        "total": 0
-    })
-}
-
-/// Handle POST /debug/policy
-fn handle_policy() -> serde_json::Value {
-    json!({
-        "decision": "not_implemented",
-        "reason": "Policy evaluation endpoint not yet implemented"
-    })
+/// Create a 404 Not Found response
+fn create_not_found_response(path: &str) -> String {
+    let body = json!({"error": "Not found", "path": path}).to_string();
+    format!(
+        "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+        body.len(),
+        body
+    )
 }

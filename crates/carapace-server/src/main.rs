@@ -76,39 +76,24 @@ async fn main() -> Result<()> {
         loop {
             match listener.accept().await {
                 Ok((stream, addr)) => {
-                    eprintln!("DEBUG: TCP connection accepted from {}", addr);
                     tracing::info!("New connection from {}", addr);
                     let cli_dispatcher = cli_dispatcher.clone();
                     let http_dispatcher = http_dispatcher.clone();
                     let tracker_clone = connection_tracker.clone();
 
-                    eprintln!("DEBUG: About to spawn listener task");
                     tokio::spawn(async move {
-                        eprintln!("DEBUG: In spawned task for {}", addr);
-                        tracing::info!("Spawned listener task for connection from {}", addr);
-
-                        // Register the connection
                         tracker_clone.register(addr).await;
 
                         let (read, write) = stream.into_split();
-                        eprintln!("DEBUG: Stream split");
                         let listener = Listener::new(cli_dispatcher, http_dispatcher);
-                        eprintln!("DEBUG: Listener created");
 
-                        tracing::info!("About to call listener.listen() for {}", addr);
-                        eprintln!("DEBUG: About to call listener.listen()");
                         if let Err(e) = listener.listen(read, write).await {
-                            eprintln!("DEBUG: Connection error: {}", e);
                             tracing::error!("Connection error for {}: {}", addr, e);
                         }
 
-                        // Unregister the connection
                         tracker_clone.unregister(addr).await;
-
-                        eprintln!("DEBUG: Connection from {} closed", addr);
                         tracing::info!("Connection from {} closed", addr);
                     });
-                    eprintln!("DEBUG: Task spawned");
                 }
                 Err(e) => {
                     tracing::error!("Failed to accept connection: {}", e);

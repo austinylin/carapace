@@ -35,19 +35,12 @@ impl HttpDispatcher {
         req: HttpRequest,
         sse_event_tx: Option<tokio::sync::mpsc::UnboundedSender<Message>>,
     ) -> anyhow::Result<Option<HttpResponse>> {
-        eprintln!(
-            "DEBUG: http_dispatch.dispatch_http() called for tool={}, method={}, path={}",
-            req.tool, req.method, req.path
-        );
-
         // Check if tool is allowed in policy
         let tool_config = self
             .policy
             .tools
             .get(&req.tool)
             .ok_or_else(|| anyhow::anyhow!("Tool '{}' not in policy", req.tool))?;
-
-        eprintln!("DEBUG: Tool config found, proceeding with dispatch");
 
         // Get HTTP policy
         let http_policy = match tool_config {
@@ -100,14 +93,9 @@ impl HttpDispatcher {
         }
 
         // Send request to upstream
-        eprintln!(
-            "DEBUG: About to call proxy_to_upstream for {}",
-            http_policy.upstream
-        );
         let response = self
             .proxy_to_upstream(http_policy, &req, sse_event_tx)
             .await?;
-        eprintln!("DEBUG: proxy_to_upstream returned successfully");
 
         Ok(response)
     }
@@ -119,9 +107,7 @@ impl HttpDispatcher {
         req: &HttpRequest,
         sse_event_tx: Option<tokio::sync::mpsc::UnboundedSender<Message>>,
     ) -> anyhow::Result<Option<HttpResponse>> {
-        eprintln!("DEBUG: proxy_to_upstream() starting for {}", req.tool);
         let url = format!("{}{}", policy.upstream, req.path);
-        eprintln!("DEBUG: Constructed URL: {}", url);
 
         let mut request_builder = match req.method.as_str() {
             "GET" => self.client.get(&url),
@@ -162,22 +148,7 @@ impl HttpDispatcher {
         };
 
         // Send request with timeout
-        eprintln!(
-            "DEBUG: About to send HTTP request with {} second timeout",
-            timeout_duration.as_secs()
-        );
-        let response = tokio::time::timeout(timeout_duration, request_builder.send()).await;
-
-        match &response {
-            Ok(Ok(r)) => eprintln!("DEBUG: HTTP request completed, got status: {}", r.status()),
-            Ok(Err(e)) => eprintln!("DEBUG: HTTP request failed: {}", e),
-            Err(_) => eprintln!(
-                "DEBUG: HTTP request timed out after {} seconds",
-                timeout_duration.as_secs()
-            ),
-        }
-
-        let response = response??;
+        let response = tokio::time::timeout(timeout_duration, request_builder.send()).await??;
 
         // Extract response
         let status = response.status().as_u16();
@@ -189,16 +160,12 @@ impl HttpDispatcher {
 
         // Handle SSE endpoints with real-time streaming
         let body = if is_sse_endpoint {
-            eprintln!("DEBUG: SSE endpoint detected - enabling real-time streaming");
-
             if let Some(tx) = sse_event_tx {
                 // Stream events in real-time as they arrive from upstream
-                // Don't buffer - send each event immediately when received
                 use futures::StreamExt;
 
                 let mut stream = response.bytes_stream();
                 let mut buffer = String::new();
-                let mut event_count = 0;
 
                 while let Some(chunk_result) = stream.next().await {
                     match chunk_result {
@@ -208,7 +175,7 @@ impl HttpDispatcher {
                             // SSE format: "event: type\ndata: json_value\n\n"
                             // Process complete events (delimited by \n\n)
                             while let Some(end_pos) = buffer.find("\n\n") {
-                                let event_block = buffer[..end_pos].to_string(); // Clone to avoid borrow issues
+                                let event_block = buffer[..end_pos].to_string();
                                 buffer = buffer[end_pos + 2..].to_string();
 
                                 // Parse SSE headers
@@ -223,8 +190,6 @@ impl HttpDispatcher {
                                     }
                                 }
 
-                                // Create and send SseEvent message IMMEDIATELY
-                                // This is the critical fix: <100ms latency, not 2 seconds!
                                 let sse_msg = Message::SseEvent(SseEvent {
                                     id: req.id.clone(),
                                     tool: req.tool.clone(),
@@ -232,32 +197,22 @@ impl HttpDispatcher {
                                     data: event_data,
                                 });
 
-                                event_count += 1;
-                                eprintln!(
-                                    "DEBUG: SSE event #{} sent immediately (id={}, event=...)",
-                                    event_count, req.id
-                                );
-
-                                // UnboundedSender::send() never blocks
                                 if let Err(e) = tx.send(sse_msg) {
-                                    eprintln!("DEBUG: SSE client disconnected: {}", e);
-                                    return Ok(None); // Client gone, exit
+                                    tracing::warn!("SSE client disconnected: {}", e);
+                                    return Ok(None);
                                 }
                             }
                         }
                         Err(e) => {
-                            eprintln!("DEBUG: Upstream connection error during SSE: {}", e);
                             return Err(anyhow::anyhow!("Upstream SSE error: {}", e));
                         }
                     }
                 }
 
-                eprintln!("DEBUG: SSE stream completed, {} events sent", event_count);
-                // Return None: SSE response was streamed, not returned as HttpResponse
+                // SSE response was streamed, not returned as HttpResponse
                 None
             } else {
-                // Fallback: no sender provided (shouldn't happen with listener.rs properly set up)
-                eprintln!("DEBUG: SSE endpoint but sse_event_tx is None - using 2-second fallback");
+                // Fallback: no sender provided
                 tokio::time::timeout(std::time::Duration::from_secs(2), response.text())
                     .await
                     .ok()
@@ -266,7 +221,6 @@ impl HttpDispatcher {
             }
         } else {
             // Regular (non-SSE) endpoints: buffer normally
-            eprintln!("DEBUG: Regular endpoint - buffering full response");
             response.text().await.ok()
         };
 

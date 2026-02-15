@@ -6,8 +6,6 @@ mod audit;
 mod connections;
 mod health;
 mod policy;
-mod sniff;
-mod sse_test;
 
 #[derive(Parser)]
 #[command(name = "carapace-debug")]
@@ -101,44 +99,6 @@ enum Commands {
         #[arg(long, default_value = "text")]
         format: String,
     },
-
-    /// Sniff TCP messages between agent and server
-    Sniff {
-        /// Server host to monitor (default: localhost)
-        #[arg(long, default_value = "localhost")]
-        host: String,
-
-        /// Server port to monitor (default: 8765)
-        #[arg(long, default_value = "8765")]
-        port: u16,
-
-        /// Filter: only show messages containing this type (HttpRequest, CliRequest, SseEvent, etc)
-        #[arg(long)]
-        filter: Option<String>,
-
-        /// Maximum message size to capture (default: 10KB)
-        #[arg(long, default_value = "10240")]
-        max_size: usize,
-    },
-
-    /// Test SSE streaming with mock events
-    SseTest {
-        /// Number of events to emit (default: 5)
-        #[arg(long, default_value = "5")]
-        count: usize,
-
-        /// Interval between events in milliseconds (default: 200ms)
-        #[arg(long, default_value = "200")]
-        interval_ms: u64,
-
-        /// Event type (default: "message")
-        #[arg(long, default_value = "message")]
-        event_type: String,
-
-        /// Tool name (default: "signal-cli")
-        #[arg(long, default_value = "signal-cli")]
-        tool: String,
-    },
 }
 
 #[tokio::main]
@@ -175,22 +135,6 @@ async fn main() -> Result<()> {
             format,
         } => {
             policy::policy(&policy, &request, &format).await?;
-        }
-        Commands::Sniff {
-            host,
-            port,
-            filter,
-            max_size,
-        } => {
-            sniff::sniff(&host, port, filter, max_size).await?;
-        }
-        Commands::SseTest {
-            count,
-            interval_ms,
-            event_type,
-            tool,
-        } => {
-            sse_test::sse_test(count, interval_ms, &event_type, &tool).await?;
         }
     }
 

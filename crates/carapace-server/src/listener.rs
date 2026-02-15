@@ -29,39 +29,30 @@ impl Listener {
         R: AsyncRead + Unpin + Send + 'static,
         W: AsyncWrite + Unpin + Send + 'static,
     {
-        eprintln!("DEBUG: listener.listen() called - STARTING");
-        tracing::info!("Listener: listen() called - starting");
         let mut frame_read = FramedRead::new(stdin, MessageCodec);
         let frame_write = Arc::new(Mutex::new(FramedWrite::new(stdout, MessageCodec)));
-        eprintln!("DEBUG: Framed read/write created");
 
         // Create unbounded channel for SSE events
         // Events sent through this channel are forwarded to client by background task
         let (sse_event_tx, mut sse_event_rx) = tokio::sync::mpsc::unbounded_channel::<Message>();
-        eprintln!("DEBUG: SSE event channel created");
 
         // Spawn background task to forward SSE events as they arrive
         // This allows real-time delivery without blocking the main request loop
         let fw_clone = frame_write.clone();
         tokio::spawn(async move {
-            eprintln!("DEBUG: SSE forwarding task started");
             while let Some(event) = sse_event_rx.recv().await {
-                eprintln!("DEBUG: Forwarding SseEvent to client");
                 match fw_clone.lock().await.send(event).await {
                     Ok(_) => {}
                     Err(e) => {
                         tracing::error!("Failed to send SSE event: {}", e);
-                        eprintln!("DEBUG: SSE client disconnected: {}", e);
-                        break; // Exit if client disconnected
+                        break;
                     }
                 }
             }
-            eprintln!("DEBUG: SSE forwarding task exiting");
         });
 
         // Main loop: read messages and dispatch them
         while let Some(result) = frame_read.next().await {
-            tracing::info!("Listener: Processing incoming message");
             match result {
                 Ok(msg) => {
                     // Log what type of message we received

@@ -30,6 +30,44 @@ WORK_DIR="/tmp/carapace-deploy-$$"
 echo -e "${YELLOW}=== Carapace Deployment ===${NC}"
 echo ""
 
+# Check for in-progress builds first
+echo -e "${YELLOW}Checking for in-progress builds...${NC}"
+
+IN_PROGRESS=$(gh run list --limit 20 --json name,status,databaseId -q '.[] | select(.name=="Build" and (.status=="in_progress" or .status=="queued" or .status=="waiting")) | .databaseId' 2>/dev/null | head -1)
+
+if [[ -n "$IN_PROGRESS" ]]; then
+    echo -e "${BLUE}Build #$IN_PROGRESS is currently in progress${NC}"
+    echo -e "${YELLOW}Waiting for build to complete...${NC}"
+    echo ""
+
+    # Wait for build to complete (check every 10 seconds)
+    while true; do
+        BUILD_STATUS=$(gh run view "$IN_PROGRESS" --json status,conclusion -q '.status' 2>/dev/null)
+
+        if [[ "$BUILD_STATUS" == "completed" ]]; then
+            BUILD_CONCLUSION=$(gh run view "$IN_PROGRESS" --json conclusion -q '.conclusion' 2>/dev/null)
+
+            if [[ "$BUILD_CONCLUSION" == "success" ]]; then
+                echo -e "${GREEN}✓ Build #$IN_PROGRESS completed successfully${NC}"
+                break
+            else
+                echo -e "${RED}ERROR: Build #$IN_PROGRESS failed with conclusion: $BUILD_CONCLUSION${NC}"
+                echo ""
+                echo -e "${BLUE}View build logs:${NC}"
+                echo -e "  ${YELLOW}gh run view $IN_PROGRESS --log${NC}"
+                echo ""
+                echo "  Or visit:"
+                echo "  https://github.com/austinylin/carapace/actions/runs/$IN_PROGRESS"
+                exit 1
+            fi
+        fi
+
+        echo -n "."
+        sleep 10
+    done
+    echo ""
+fi
+
 # Get the latest successful Build run using JSON parsing
 echo -e "${YELLOW}Finding latest successful build...${NC}"
 

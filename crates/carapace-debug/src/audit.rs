@@ -21,27 +21,21 @@ pub async fn audit(
     let cutoff_time = since_filter.as_ref().and_then(|s| parse_time_filter(s));
 
     if follow {
-        // Tail mode
-        tail_audit_log(
-            file,
-            tool_filter,
-            action_filter,
-            result_filter,
-            cutoff_time,
-            format,
-        )?;
-    } else {
-        // Query mode
-        query_audit_log(
-            file,
-            tool_filter,
-            action_filter,
-            result_filter,
-            cutoff_time,
-            format,
-            limit,
-        )?;
+        return Err(anyhow::anyhow!(
+            "Follow mode is not implemented. Use: tail -f {}",
+            file.display()
+        ));
     }
+
+    query_audit_log(
+        file,
+        tool_filter,
+        action_filter,
+        result_filter,
+        cutoff_time,
+        format,
+        limit,
+    )?;
 
     Ok(())
 }
@@ -213,19 +207,6 @@ fn print_audit_table(entries: &[Value]) {
     }
 
     println!("\nTotal: {} entries", entries.len());
-}
-
-fn tail_audit_log(
-    _file: &Path,
-    _tool_filter: Option<String>,
-    _action_filter: Option<String>,
-    _result_filter: Option<String>,
-    _cutoff_time: Option<chrono::DateTime<Utc>>,
-    _format: &str,
-) -> Result<()> {
-    println!("Tail mode not yet implemented");
-    // TODO: Implement tail with inotify
-    Ok(())
 }
 
 /// Parse time filter like "5m", "1h", "24h"
