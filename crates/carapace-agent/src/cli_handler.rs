@@ -55,20 +55,12 @@ impl CliHandler {
     ) -> Result<()> {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-        // Read request from socket using dynamic buffer
+        // Read request from socket until EOF.
+        // The shim calls shutdown() after writing, so we read until we get EOF (n==0).
+        // Previous heuristic (break if n < buf size) was unreliable and could hang
+        // if the message happened to fill a read buffer exactly.
         let mut buf = Vec::with_capacity(8192);
-        let mut tmp = [0u8; 4096];
-        loop {
-            let n = socket.read(&mut tmp).await?;
-            if n == 0 {
-                break;
-            }
-            buf.extend_from_slice(&tmp[..n]);
-            // If we read less than the buffer, we likely have the full message
-            if n < tmp.len() {
-                break;
-            }
-        }
+        socket.read_to_end(&mut buf).await?;
 
         if buf.is_empty() {
             return Ok(());

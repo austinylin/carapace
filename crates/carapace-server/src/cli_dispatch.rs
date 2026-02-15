@@ -118,34 +118,55 @@ impl CliDispatcher {
 
         let mut child = cmd.spawn()?;
 
-        // Wait for process with timeout - kill if it exceeds the limit
+        // Take stdout/stderr handles BEFORE waiting - we must drain them
+        // concurrently with waiting for exit to prevent pipe buffer deadlock.
+        // If the process fills the OS pipe buffer (~64KB) and nobody is reading,
+        // the process blocks on write and child.wait() hangs forever.
+        let mut stdout_handle = child.stdout.take();
+        let mut stderr_handle = child.stderr.take();
+
+        // Spawn concurrent tasks to drain stdout and stderr
+        let stdout_task = tokio::spawn(async move {
+            let mut buf = Vec::new();
+            if let Some(ref mut out) = stdout_handle {
+                tokio::io::AsyncReadExt::read_to_end(out, &mut buf)
+                    .await
+                    .ok();
+            }
+            buf
+        });
+        let stderr_task = tokio::spawn(async move {
+            let mut buf = Vec::new();
+            if let Some(ref mut err) = stderr_handle {
+                tokio::io::AsyncReadExt::read_to_end(err, &mut buf)
+                    .await
+                    .ok();
+            }
+            buf
+        });
+
+        // Wait for process exit with timeout (stdout/stderr drain concurrently)
         match tokio::time::timeout(Duration::from_secs(timeout_secs), child.wait()).await {
             Ok(Ok(status)) => {
-                // Process exited within timeout - collect output
-                let stdout = if let Some(mut out) = child.stdout.take() {
-                    let mut buf = Vec::new();
-                    tokio::io::AsyncReadExt::read_to_end(&mut out, &mut buf).await?;
-                    buf
-                } else {
-                    Vec::new()
-                };
-                let stderr = if let Some(mut err) = child.stderr.take() {
-                    let mut buf = Vec::new();
-                    tokio::io::AsyncReadExt::read_to_end(&mut err, &mut buf).await?;
-                    buf
-                } else {
-                    Vec::new()
-                };
+                // Process exited - collect drained output
+                let stdout = stdout_task.await.unwrap_or_default();
+                let stderr = stderr_task.await.unwrap_or_default();
                 Ok(std::process::Output {
                     status,
                     stdout,
                     stderr,
                 })
             }
-            Ok(Err(e)) => Err(anyhow::anyhow!("Command failed: {}", e)),
+            Ok(Err(e)) => {
+                stdout_task.abort();
+                stderr_task.abort();
+                Err(anyhow::anyhow!("Command failed: {}", e))
+            }
             Err(_) => {
                 // Timeout exceeded - kill the process
                 child.kill().await.ok();
+                stdout_task.abort();
+                stderr_task.abort();
                 Err(anyhow::anyhow!(
                     "Command timed out after {} seconds",
                     timeout_secs

@@ -61,8 +61,14 @@ impl Listener {
         let fw_clone = frame_write.clone();
         tokio::spawn(async move {
             while let Some(event) = sse_event_rx.recv().await {
-                match fw_clone.lock().await.send(event).await {
-                    Ok(_) => {}
+                let mut writer = fw_clone.lock().await;
+                match writer.send(event).await {
+                    Ok(_) => {
+                        if let Err(e) = writer.flush().await {
+                            tracing::error!("Failed to flush SSE event: {}", e);
+                            break;
+                        }
+                    }
                     Err(e) => {
                         tracing::error!("Failed to send SSE event: {}", e);
                         break;
@@ -81,8 +87,11 @@ impl Listener {
                             id: ping.id.clone(),
                             timestamp: ping.timestamp,
                         });
-                        if let Err(e) = frame_write.lock().await.send(pong).await {
+                        let mut writer = frame_write.lock().await;
+                        if let Err(e) = writer.send(pong).await {
                             tracing::error!("Failed to send Pong: {}", e);
+                        } else if let Err(e) = writer.flush().await {
+                            tracing::error!("Failed to flush Pong: {}", e);
                         }
                         continue;
                     }
@@ -106,9 +115,12 @@ impl Listener {
                     if let Some(response) =
                         self.dispatch_message(msg, Some(sse_event_tx.clone())).await
                     {
-                        if let Err(e) = frame_write.lock().await.send(response).await {
+                        let mut writer = frame_write.lock().await;
+                        if let Err(e) = writer.send(response).await {
                             tracing::error!("Failed to send response: {}", e);
                             // Continue processing messages instead of closing connection
+                        } else if let Err(e) = writer.flush().await {
+                            tracing::error!("Failed to flush response: {}", e);
                         }
                     }
                 }
