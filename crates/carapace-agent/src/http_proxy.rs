@@ -89,6 +89,14 @@ async fn handle_rpc(
 
     let request_id = Uuid::new_v4().to_string();
 
+    // Remove "tool" field from JSON body (it's for Carapace, not the upstream service)
+    let mut json_body = json.clone();
+    if let serde_json::Value::Object(ref mut obj) = json_body {
+        obj.remove("tool");
+    }
+    let body_without_tool = serde_json::to_string(&json_body)
+        .unwrap_or_else(|_| body_str.clone());
+
     // Create HttpRequest with original path
     let http_req = HttpRequest {
         id: request_id.clone(),
@@ -100,7 +108,7 @@ async fn handle_rpc(
             h.insert("Content-Type".to_string(), "application/json".to_string());
             h
         },
-        body: Some(body_str),
+        body: Some(body_without_tool),
     };
 
     // Register waiter for response
@@ -176,18 +184,27 @@ async fn handle_http(
 
     let request_id = Uuid::new_v4().to_string();
 
-    // Extract tool from JSON body if present
-    let tool = if let Some(body) = &body_str {
-        if let Ok(json) = serde_json::from_str::<serde_json::Value>(body) {
-            json.get("tool")
+    // Extract tool from JSON body if present, and strip "tool" field before forwarding
+    let (tool, final_body) = if let Some(body) = &body_str {
+        if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(body) {
+            let tool = json.get("tool")
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown")
-                .to_string()
+                .to_string();
+
+            // Remove "tool" field (it's for Carapace, not the upstream service)
+            if let serde_json::Value::Object(ref mut obj) = json {
+                obj.remove("tool");
+            }
+            let body_without_tool = serde_json::to_string(&json)
+                .unwrap_or_else(|_| body.clone());
+
+            (tool, Some(body_without_tool))
         } else {
-            "unknown".to_string()
+            ("unknown".to_string(), Some(body.clone()))
         }
     } else {
-        "unknown".to_string()
+        ("unknown".to_string(), None)
     };
 
     // Create HttpRequest
@@ -197,7 +214,7 @@ async fn handle_http(
         method,
         path,
         headers: HashMap::new(),
-        body: body_str,
+        body: final_body,
     };
 
     // Register waiter for response
@@ -313,6 +330,14 @@ async fn handle_fallback(
     let request_id = Uuid::new_v4().to_string();
     let method = "POST".to_string();
 
+    // Remove "tool" field from JSON body (it's for Carapace, not the upstream service)
+    let mut json_body = json.clone();
+    if let serde_json::Value::Object(ref mut obj) = json_body {
+        obj.remove("tool");
+    }
+    let body_without_tool = serde_json::to_string(&json_body)
+        .unwrap_or_else(|_| body_str.clone());
+
     // Create HttpRequest with tool from body and original path
     let http_req = HttpRequest {
         id: request_id.clone(),
@@ -324,7 +349,7 @@ async fn handle_fallback(
             h.insert("Content-Type".to_string(), "application/json".to_string());
             h
         },
-        body: Some(body_str),
+        body: Some(body_without_tool),
     };
 
     // Register waiter for response
