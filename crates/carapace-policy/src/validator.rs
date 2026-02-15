@@ -49,10 +49,24 @@ impl PolicyValidator {
                 PolicyError::Violation("Missing params field in JSON-RPC request".to_string())
             })?;
 
-            // Extract the field to filter on
+            // Extract the field to filter on (handle both string and array values)
             let field_value = params
                 .get(&filter.field)
-                .and_then(|v| v.as_str())
+                .and_then(|v| {
+                    // Try as string first
+                    if let Some(s) = v.as_str() {
+                        return Some(s.to_string());
+                    }
+                    // If it's an array, take the first element as a string
+                    if let Some(arr) = v.as_array() {
+                        if let Some(first) = arr.first() {
+                            if let Some(s) = first.as_str() {
+                                return Some(s.to_string());
+                            }
+                        }
+                    }
+                    None
+                })
                 .ok_or_else(|| {
                     PolicyError::Violation(format!(
                         "Missing or invalid field '{}' in params",
@@ -66,7 +80,7 @@ impl PolicyValidator {
                     PolicyError::Violation(format!("Invalid deny pattern '{}': {}", pattern_str, e))
                 })?;
 
-                if pattern.matches(field_value) {
+                if pattern.matches(&field_value) {
                     return Err(PolicyError::Violation(format!(
                         "Param '{}' value '{}' matches deny pattern '{}'",
                         filter.field, field_value, pattern_str
@@ -85,7 +99,7 @@ impl PolicyValidator {
                         ))
                     })?;
 
-                    if pattern.matches(field_value) {
+                    if pattern.matches(&field_value) {
                         allowed = true;
                         break;
                     }
