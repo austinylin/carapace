@@ -76,13 +76,23 @@ impl CliHandler {
             .map(|s| s.to_string())
             .collect();
 
+        // Extract environment from the request
+        let mut env = HashMap::new();
+        if let Some(env_obj) = req_json["env"].as_object() {
+            for (key, value) in env_obj {
+                if let Some(v) = value.as_str() {
+                    env.insert(key.clone(), v.to_string());
+                }
+            }
+        }
+
         // Create CLI request
         let id = Uuid::new_v4().to_string();
         let cli_req = CliRequest {
             id: id.clone(),
             tool,
             argv,
-            env: HashMap::new(),
+            env,
             stdin: None,
             cwd: std::env::current_dir()?
                 .to_str()

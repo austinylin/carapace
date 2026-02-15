@@ -67,8 +67,14 @@ impl CliDispatcher {
             }
         }
 
+        // Merge policy-injected env vars with request env (policy takes precedence)
+        let mut merged_env = req.env.clone();
+        for (key, value) in &cli_policy.env_inject {
+            merged_env.insert(key.clone(), value.clone());
+        }
+
         // Execute the command
-        let output = self.execute_command(&cli_policy.binary, &req.argv, &req.env).await?;
+        let output = self.execute_command(&cli_policy.binary, &req.argv, &merged_env).await?;
 
         Ok(CliResponse {
             id: req.id,

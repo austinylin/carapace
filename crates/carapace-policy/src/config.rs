@@ -1,9 +1,24 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PolicyConfig {
     pub tools: HashMap<String, ToolPolicy>,
+}
+
+impl PolicyConfig {
+    /// Load policy from YAML file
+    pub fn from_file(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let path = Path::new(path);
+        if !path.exists() {
+            return Err(format!("Policy file not found: {}", path.display()).into());
+        }
+
+        let content = std::fs::read_to_string(path)?;
+        serde_yaml::from_str(&content)
+            .map_err(|e| format!("Failed to parse policy YAML: {}", e).into())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

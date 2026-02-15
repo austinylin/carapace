@@ -41,11 +41,6 @@ impl ArgvMatcher {
 
     /// Match argv against allow/deny patterns
     pub fn matches(&self, argv: &[String]) -> bool {
-        // Empty argv never matches anything
-        if argv.is_empty() {
-            return false;
-        }
-
         let argv_str = argv.join(" ");
 
         // Check deny patterns first - they take precedence

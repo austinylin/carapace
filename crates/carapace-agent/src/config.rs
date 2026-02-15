@@ -5,8 +5,8 @@ use crate::error::{AgentError, Result};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {
-    /// SSH connection details
-    pub ssh: SshConfig,
+    /// TCP server connection details
+    pub server: TcpServerConfig,
 
     /// Unix socket for CLI handlers
     pub cli_socket: String,
@@ -19,19 +19,12 @@ pub struct AgentConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SshConfig {
-    /// SSH host (user@host)
+pub struct TcpServerConfig {
+    /// Server hostname (e.g., austin-ubuntu-desktop.orca-puffin.ts.net)
     pub host: String,
 
-    /// Remote command to execute on host
-    pub remote_command: String,
-
-    /// Control socket path for multiplexing
-    pub control_socket: String,
-
-    /// Connection timeout in seconds
-    #[serde(default = "default_timeout")]
-    pub timeout_secs: u64,
+    /// Server TCP port
+    pub port: u16,
 
     /// Reconnection attempts
     #[serde(default = "default_reconnect_attempts")]
@@ -95,14 +88,13 @@ impl AgentConfig {
     /// Load config from environment or defaults
     pub fn from_env() -> Self {
         AgentConfig {
-            ssh: SshConfig {
-                host: std::env::var("CARAPACE_SSH_HOST")
+            server: TcpServerConfig {
+                host: std::env::var("CARAPACE_SERVER_HOST")
                     .unwrap_or_else(|_| "localhost".to_string()),
-                remote_command: std::env::var("CARAPACE_REMOTE_CMD")
-                    .unwrap_or_else(|_| "carapace-server".to_string()),
-                control_socket: std::env::var("CARAPACE_CONTROL_SOCKET")
-                    .unwrap_or_else(|_| "/tmp/carapace.sock".to_string()),
-                timeout_secs: 30,
+                port: std::env::var("CARAPACE_SERVER_PORT")
+                    .ok()
+                    .and_then(|p| p.parse().ok())
+                    .unwrap_or(8765),
                 reconnect_attempts: 5,
                 reconnect_backoff_ms: 100,
             },
@@ -168,14 +160,14 @@ mod tests {
     #[test]
     fn test_config_from_env() {
         let cfg = AgentConfig::from_env();
-        assert_eq!(cfg.ssh.timeout_secs, 30);
+        assert_eq!(cfg.server.port, 8765);
         assert_eq!(cfg.http.port, 8080);
     }
 
     #[test]
     fn test_config_defaults() {
         let cfg = AgentConfig::default();
-        assert!(!cfg.ssh.host.is_empty());
+        assert!(!cfg.server.host.is_empty());
         assert!(!cfg.cli_socket.is_empty());
     }
 }

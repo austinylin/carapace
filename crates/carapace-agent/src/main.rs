@@ -13,25 +13,24 @@ async fn main() -> AgentResult<()> {
 
     tracing::info!("carapace-agent starting");
 
-    // Load config (for now, use defaults or env vars)
+    // Load config from environment
     let config = carapace_agent::config::AgentConfig::from_env();
 
-    // Establish SSH connection to server
+    // Establish TCP connection to server
     let connection = Arc::new(
-        Connection::connect(
-            &config.ssh.host,
-            &config.ssh.remote_command,
-            &config.ssh.control_socket,
+        Connection::connect_tcp(
+            &config.server.host,
+            config.server.port,
         )
         .await?,
     );
 
-    tracing::info!("SSH connection established to {}", config.ssh.host);
+    tracing::info!("TCP connection established to {}:{}", config.server.host, config.server.port);
 
     // Create multiplexer for request/response matching
     let multiplexer = Arc::new(Multiplexer::new());
 
-    // Spawn background task to read messages from SSH connection and feed into multiplexer
+    // Spawn background task to read messages from TCP connection and feed into multiplexer
     let connection_read = connection.clone();
     let multiplexer_response = multiplexer.clone();
     tokio::spawn(async move {
@@ -42,12 +41,31 @@ async fn main() -> AgentResult<()> {
                     multiplexer_response.handle_response(msg).await;
                 }
                 Ok(None) => {
-                    tracing::warn!("SSH connection closed by server");
+                    tracing::warn!("TCP connection closed by server");
                     break;
                 }
                 Err(e) => {
-                    tracing::error!("Error reading from SSH connection: {}", e);
+                    tracing::error!("Error reading from TCP connection: {}", e);
                     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                }
+            }
+        }
+    });
+
+    // Spawn connection health monitor for automatic reconnection
+    let connection_monitor = connection.clone();
+    let server_host = config.server.host.clone();
+    let server_port = config.server.port;
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+
+            if !connection_monitor.is_healthy().await {
+                tracing::warn!("Connection unhealthy, attempting automatic reconnection to {}:{}", server_host, server_port);
+                if let Err(e) = connection_monitor.reconnect_if_needed().await {
+                    tracing::error!("Auto-reconnection failed: {}", e);
+                } else {
+                    tracing::info!("Auto-reconnection successful");
                 }
             }
         }

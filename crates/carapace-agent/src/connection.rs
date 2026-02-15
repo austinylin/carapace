@@ -1,48 +1,41 @@
 use carapace_protocol::{Message, MessageCodec};
 use futures::{SinkExt, StreamExt};
-use std::process::Stdio;
 use std::sync::Arc;
-use tokio::process::{Child, Command};
+use tokio::net::TcpStream;
 use tokio::sync::RwLock;
 use tokio_util::codec::{FramedRead, FramedWrite};
 
 use crate::error::{AgentError, Result};
 
 pub struct Connection {
-    child: Arc<RwLock<Option<Child>>>,
-    frame_read: Arc<RwLock<Option<FramedRead<tokio::process::ChildStdout, MessageCodec>>>>,
-    frame_write: Arc<RwLock<Option<FramedWrite<tokio::process::ChildStdin, MessageCodec>>>>,
-    ssh_host: String,
-    remote_command: String,
-    control_socket: String,
+    frame_read: Arc<RwLock<Option<FramedRead<tokio::net::tcp::OwnedReadHalf, MessageCodec>>>>,
+    frame_write: Arc<RwLock<Option<FramedWrite<tokio::net::tcp::OwnedWriteHalf, MessageCodec>>>>,
+    server_host: String,
+    server_port: u16,
     reconnect_attempts: u32,
     reconnect_backoff_ms: u64,
 }
 
 impl Connection {
-    /// Establish SSH connection to the server with reconnection support
-    pub async fn connect(
-        ssh_host: &str,
-        remote_command: &str,
-        control_socket: &str,
+    /// Connect to server via TCP
+    pub async fn connect_tcp(
+        server_host: &str,
+        server_port: u16,
     ) -> Result<Self> {
-        Self::connect_with_config(ssh_host, remote_command, control_socket, 5, 100).await
+        Self::connect_tcp_with_config(server_host, server_port, 5, 100).await
     }
 
-    pub async fn connect_with_config(
-        ssh_host: &str,
-        remote_command: &str,
-        control_socket: &str,
+    pub async fn connect_tcp_with_config(
+        server_host: &str,
+        server_port: u16,
         reconnect_attempts: u32,
         reconnect_backoff_ms: u64,
     ) -> Result<Self> {
         let connection = Connection {
-            child: Arc::new(RwLock::new(None)),
             frame_read: Arc::new(RwLock::new(None)),
             frame_write: Arc::new(RwLock::new(None)),
-            ssh_host: ssh_host.to_string(),
-            remote_command: remote_command.to_string(),
-            control_socket: control_socket.to_string(),
+            server_host: server_host.to_string(),
+            server_port,
             reconnect_attempts,
             reconnect_backoff_ms,
         };
@@ -52,29 +45,26 @@ impl Connection {
         Ok(connection)
     }
 
-    /// Establish/re-establish SSH connection
+    /// Establish/re-establish TCP connection
     async fn establish_connection(&self) -> Result<()> {
-        let mut last_error = None;
-
         for attempt in 0..self.reconnect_attempts {
             match self.try_connect().await {
-                Ok((child, frame_read, frame_write)) => {
-                    let mut child_lock = self.child.write().await;
+                Ok((frame_read, frame_write)) => {
                     let mut read_lock = self.frame_read.write().await;
                     let mut write_lock = self.frame_write.write().await;
 
-                    *child_lock = Some(child);
                     *read_lock = Some(frame_read);
                     *write_lock = Some(frame_write);
 
                     tracing::info!(
-                        "SSH connection established after {} attempts",
+                        "TCP connection established to {}:{} after {} attempts",
+                        self.server_host,
+                        self.server_port,
                         attempt + 1
                     );
                     return Ok(());
                 }
                 Err(e) => {
-                    last_error = Some(e);
                     if attempt < self.reconnect_attempts - 1 {
                         let backoff =
                             self.reconnect_backoff_ms * (2_u64.pow(attempt as u32)).min(3600000);
@@ -82,7 +72,7 @@ impl Connection {
                             "Connection attempt {} failed, retrying in {}ms: {}",
                             attempt + 1,
                             backoff,
-                            last_error.as_ref().unwrap()
+                            e
                         );
                         tokio::time::sleep(tokio::time::Duration::from_millis(backoff)).await;
                     }
@@ -95,57 +85,39 @@ impl Connection {
         })
     }
 
-    /// Try to establish SSH connection (single attempt)
+    /// Try to establish TCP connection (single attempt)
     async fn try_connect(
         &self,
     ) -> Result<(
-        Child,
-        FramedRead<tokio::process::ChildStdout, MessageCodec>,
-        FramedWrite<tokio::process::ChildStdin, MessageCodec>,
+        FramedRead<tokio::net::tcp::OwnedReadHalf, MessageCodec>,
+        FramedWrite<tokio::net::tcp::OwnedWriteHalf, MessageCodec>,
     )> {
-        let mut child = Command::new("ssh")
-            .args(&[
-                "-M",                                   // Master mode (multiplexing)
-                "-S",
-                &self.control_socket,                  // Control socket path
-                "-o",
-                "ControlPersist=10m",                  // Keep connection alive
-                "-o",
-                "StrictHostKeyChecking=accept-new",   // Accept unknown hosts
-                &self.ssh_host,
-                &self.remote_command,                 // Remote command
-            ])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| AgentError::SSHConnectionRefused(e.to_string()))?;
+        let addr = format!("{}:{}", self.server_host, self.server_port);
+        let stream = TcpStream::connect(&addr)
+            .await
+            .map_err(|e| AgentError::SSHConnectionRefused(format!("TCP connect failed: {}", e)))?;
 
-        let stdin = child.stdin.take().ok_or_else(|| {
-            AgentError::SSHConnectionLost("Failed to get stdin".to_string())
-        })?;
+        let (read, write) = stream.into_split();
+        let frame_read = FramedRead::new(read, MessageCodec);
+        let frame_write = FramedWrite::new(write, MessageCodec);
 
-        let stdout = child.stdout.take().ok_or_else(|| {
-            AgentError::SSHConnectionLost("Failed to get stdout".to_string())
-        })?;
-
-        let frame_read = FramedRead::new(stdout, MessageCodec);
-        let frame_write = FramedWrite::new(stdin, MessageCodec);
-
-        Ok((child, frame_read, frame_write))
+        Ok((frame_read, frame_write))
     }
 
     /// Send a message to the server
     pub async fn send(&self, msg: Message) -> Result<()> {
         let mut write_lock = self.frame_write.write().await;
 
-        match write_lock.as_mut() {
-            Some(writer) => writer.send(msg).await.map_err(|e| {
-                AgentError::SSHConnectionLost(format!("Send failed: {}", e))
-            }),
-            None => Err(AgentError::SSHConnectionLost(
+        if let Some(writer) = write_lock.as_mut() {
+            writer.send(msg).await.map_err(|e| {
+                tracing::error!("Failed to send message: {}", e);
+                AgentError::SSHConnectionRefused(format!("Send failed: {}", e))
+            })?;
+            Ok(())
+        } else {
+            Err(AgentError::SSHConnectionRefused(
                 "Connection not established".to_string(),
-            )),
+            ))
         }
     }
 
@@ -153,51 +125,60 @@ impl Connection {
     pub async fn recv(&self) -> Result<Option<Message>> {
         let mut read_lock = self.frame_read.write().await;
 
-        match read_lock.as_mut() {
-            Some(reader) => reader.next().await.transpose().map_err(|e| {
-                AgentError::SSHConnectionLost(format!("Receive failed: {}", e))
-            }),
-            None => Err(AgentError::SSHConnectionLost(
+        if let Some(reader) = read_lock.as_mut() {
+            match reader.next().await {
+                Some(Ok(msg)) => Ok(Some(msg)),
+                Some(Err(e)) => {
+                    tracing::error!("Failed to receive message: {}", e);
+                    Err(AgentError::SSHConnectionRefused(format!("Recv failed: {}", e)))
+                }
+                None => Ok(None),
+            }
+        } else {
+            Err(AgentError::SSHConnectionRefused(
                 "Connection not established".to_string(),
-            )),
+            ))
         }
     }
 
-    /// Kill the SSH connection
+    /// Kill the connection
     pub async fn kill(&self) -> Result<()> {
-        let mut child_lock = self.child.write().await;
+        let mut read_lock = self.frame_read.write().await;
+        let mut write_lock = self.frame_write.write().await;
 
-        if let Some(mut child) = child_lock.take() {
-            child
-                .kill()
-                .await
-                .map_err(|e| AgentError::IOError(e))?;
-        }
+        *read_lock = None;
+        *write_lock = None;
 
+        tracing::info!("TCP connection closed");
         Ok(())
     }
 
-    /// Check if connection is healthy (attempt to receive with timeout)
+    /// Check if connection is healthy
     pub async fn is_healthy(&self) -> bool {
         let read_lock = self.frame_read.read().await;
-        read_lock.is_some()
+        let write_lock = self.frame_write.read().await;
+        read_lock.is_some() && write_lock.is_some()
     }
 
-    /// Reconnect if connection is lost
+    /// Attempt reconnection if needed
     pub async fn reconnect_if_needed(&self) -> Result<()> {
         if !self.is_healthy().await {
-            tracing::warn!("Connection unhealthy, reconnecting...");
-            self.establish_connection().await?;
+            tracing::warn!("Connection unhealthy, attempting reconnect");
+            self.establish_connection().await
+        } else {
+            Ok(())
         }
-        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
-    fn test_connection_struct_creation() {
-        // Just verify the struct can be created in theory
-        // Real connection requires SSH server
+    fn test_connection_struct() {
+        // TCP connection requires actual server to be running
+        // This test just verifies the struct compiles
+        let _ = std::mem::size_of::<Connection>();
     }
 }

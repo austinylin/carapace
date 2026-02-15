@@ -1,8 +1,21 @@
 use std::sync::Arc;
 use carapace_server::{Listener, CliDispatcher, Result};
+use carapace_policy::PolicyConfig;
+use clap::Parser;
+use tokio::net::TcpListener;
+
+#[derive(Parser, Debug)]
+#[command(name = "carapace-server")]
+struct Args {
+    /// Listen on TCP socket (e.g., 127.0.0.1:8765) instead of stdin/stdout
+    #[arg(long)]
+    listen: Option<String>,
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let args = Args::parse();
+
     // Initialize tracing
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -13,17 +26,51 @@ async fn main() -> Result<()> {
 
     tracing::info!("carapace-server starting");
 
-    // Create CLI dispatcher with empty policy for now
-    let dispatcher = Arc::new(CliDispatcher::new());
+    // Load policy from YAML file
+    let policy_file = std::env::var("CARAPACE_POLICY_FILE")
+        .unwrap_or_else(|_| "/etc/carapace/policy.yaml".to_string());
 
-    // Create listener
-    let listener = Listener::new(dispatcher);
+    tracing::info!("Loading policy from: {}", policy_file);
+    let policy = PolicyConfig::from_file(&policy_file)
+        .map_err(|e| carapace_server::error::ServerError::ConfigError(e.to_string()))?;
+    tracing::info!("Policy loaded successfully: {} tools configured", policy.tools.len());
 
-    // Listen on stdin/stdout
-    let stdin = tokio::io::stdin();
-    let stdout = tokio::io::stdout();
+    // Create CLI dispatcher with policy
+    let dispatcher = Arc::new(CliDispatcher::with_policy(policy));
 
-    listener.listen(stdin, stdout).await?;
+    if let Some(listen_addr) = args.listen {
+        // TCP mode: listen on socket and accept multiple connections
+        tracing::info!("Starting TCP server on {}", listen_addr);
+        let listener = TcpListener::bind(&listen_addr).await?;
+        tracing::info!("Server listening on {}", listen_addr);
+
+        loop {
+            match listener.accept().await {
+                Ok((stream, addr)) => {
+                    tracing::info!("New connection from {}", addr);
+                    let dispatcher = dispatcher.clone();
+
+                    tokio::spawn(async move {
+                        let (read, write) = stream.into_split();
+                        let listener = Listener::new(dispatcher);
+
+                        if let Err(e) = listener.listen(read, write).await {
+                            tracing::error!("Connection error: {}", e);
+                        }
+                        tracing::info!("Connection from {} closed", addr);
+                    });
+                }
+                Err(e) => {
+                    tracing::error!("Failed to accept connection: {}", e);
+                }
+            }
+        }
+    } else {
+        // SSH mode: single connection on stdin/stdout
+        tracing::info!("Server ready, listening on stdin/stdout");
+        let listener = Listener::new(dispatcher);
+        listener.listen(tokio::io::stdin(), tokio::io::stdout()).await?;
+    }
 
     Ok(())
 }
