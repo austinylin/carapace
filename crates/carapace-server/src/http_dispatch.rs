@@ -128,9 +128,18 @@ impl HttpDispatcher {
             request_builder = request_builder.body(body.clone());
         }
 
+        // Determine timeout based on request path
+        // SSE endpoints (like /api/v1/events) need longer timeouts since they stream continuously
+        let is_sse_endpoint = req.path.contains("/api/v1/events");
+        let timeout_duration = if is_sse_endpoint {
+            std::time::Duration::from_secs(300) // 5 minutes for streaming endpoints
+        } else {
+            std::time::Duration::from_secs(policy.timeout_secs.unwrap_or(30))
+        };
+
         // Send request with timeout
         let response = tokio::time::timeout(
-            std::time::Duration::from_secs(policy.timeout_secs.unwrap_or(30)),
+            timeout_duration,
             request_builder.send(),
         )
         .await??;
@@ -143,7 +152,18 @@ impl HttpDispatcher {
             .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
             .collect();
 
-        let body = response.text().await.ok();
+        // For SSE endpoints, use a longer timeout when reading the response body
+        let body = if is_sse_endpoint {
+            tokio::time::timeout(
+                std::time::Duration::from_secs(300),
+                response.text(),
+            )
+            .await
+            .ok()
+            .and_then(|r| r.ok())
+        } else {
+            response.text().await.ok()
+        };
 
         Ok(HttpResponse {
             id: req.id.clone(),
