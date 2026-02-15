@@ -7,6 +7,7 @@ pub struct ArgvMatcher {
     deny_patterns: Vec<GlobPattern>,
 }
 
+#[allow(dead_code)]
 enum GlobPattern {
     Simple(Pattern),
     Regex(Regex),

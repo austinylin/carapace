@@ -193,6 +193,7 @@ fn test_shim_forwards_exit_code() {
 }
 
 #[test]
+#[allow(clippy::const_is_empty)]
 fn test_shim_captures_stdout_stderr() {
     // The server response contains stdout and stderr
     // Shim should write them appropriately

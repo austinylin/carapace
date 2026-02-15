@@ -34,6 +34,7 @@ pub struct AuditLogger {
     log_file: Option<String>,
     max_size_bytes: u64,
     keep_logs: u32,
+    #[allow(dead_code)]
     current_size: Arc<Mutex<u64>>,
 }
 
