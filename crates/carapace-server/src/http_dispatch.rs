@@ -115,7 +115,9 @@ impl HttpDispatcher {
         }
 
         // If we have a body but no Content-Type header, default to application/json
-        let has_content_type = req.headers.keys()
+        let has_content_type = req
+            .headers
+            .keys()
             .any(|k| k.to_lowercase() == "content-type");
         if req.body.is_some() && !has_content_type {
             request_builder = request_builder.header("Content-Type", "application/json");
@@ -252,9 +254,11 @@ mod tests {
         let mut headers = HashMap::new();
         headers.insert("content-type".to_string(), "application/json".to_string());
 
-        let has_content_type = headers.keys()
-            .any(|k| k.to_lowercase() == "content-type");
+        let has_content_type = headers.keys().any(|k| k.to_lowercase() == "content-type");
 
-        assert!(has_content_type, "Should detect content-type regardless of case");
+        assert!(
+            has_content_type,
+            "Should detect content-type regardless of case"
+        );
     }
 }

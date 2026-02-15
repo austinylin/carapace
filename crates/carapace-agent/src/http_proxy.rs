@@ -96,8 +96,7 @@ async fn handle_rpc(
     if let serde_json::Value::Object(ref mut obj) = json_body {
         obj.remove("tool");
     }
-    let body_without_tool = serde_json::to_string(&json_body)
-        .unwrap_or_else(|_| body_str.clone());
+    let body_without_tool = serde_json::to_string(&json_body).unwrap_or_else(|_| body_str.clone());
 
     // Create HttpRequest with original path
     let http_req = HttpRequest {
@@ -189,7 +188,8 @@ async fn handle_http(
     // Extract tool from JSON body if present, and strip "tool" field before forwarding
     let (tool, final_body) = if let Some(body) = &body_str {
         if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(body) {
-            let tool = json.get("tool")
+            let tool = json
+                .get("tool")
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown")
                 .to_string();
@@ -198,8 +198,7 @@ async fn handle_http(
             if let serde_json::Value::Object(ref mut obj) = json {
                 obj.remove("tool");
             }
-            let body_without_tool = serde_json::to_string(&json)
-                .unwrap_or_else(|_| body.clone());
+            let body_without_tool = serde_json::to_string(&json).unwrap_or_else(|_| body.clone());
 
             (tool, Some(body_without_tool))
         } else {
@@ -277,7 +276,11 @@ async fn handle_events(
     request: Request<Body>,
 ) -> std::result::Result<Response, HttpProxyError> {
     let path = request.uri().path().to_string();
-    let query_string = request.uri().query().map(|q| format!("?{}", q)).unwrap_or_default();
+    let query_string = request
+        .uri()
+        .query()
+        .map(|q| format!("?{}", q))
+        .unwrap_or_default();
     let full_path = format!("{}{}", path, query_string);
 
     let request_id = Uuid::new_v4().to_string();
@@ -393,8 +396,7 @@ async fn handle_fallback(
     if let serde_json::Value::Object(ref mut obj) = json_body {
         obj.remove("tool");
     }
-    let body_without_tool = serde_json::to_string(&json_body)
-        .unwrap_or_else(|_| body_str.clone());
+    let body_without_tool = serde_json::to_string(&json_body).unwrap_or_else(|_| body_str.clone());
 
     // Create HttpRequest with tool from body and original path
     let http_req = HttpRequest {

@@ -4,7 +4,6 @@
 /// Client → Agent → Server (policy enforcement) → Mock Upstream → Response back
 ///
 /// We use a mock HTTP server to simulate signal-cli or other HTTP upstreams.
-
 use carapace_policy::{HttpPolicy, PolicyConfig, ToolPolicy};
 use carapace_protocol::HttpRequest;
 use carapace_server::http_dispatch::HttpDispatcher;
@@ -22,52 +21,42 @@ async fn start_mock_http_server(addr: &str) -> SocketAddr {
 
     // Spawn background task to handle connections
     tokio::spawn(async move {
-        loop {
-            match listener.accept().await {
-                Ok((mut socket, _)) => {
-                    tokio::spawn(async move {
-                        let mut buf = vec![0; 4096];
-                        match socket.read(&mut buf).await {
-                            Ok(n) => {
-                                let request_str = String::from_utf8_lossy(&buf[..n]);
+        while let Ok((mut socket, _)) = listener.accept().await {
+            tokio::spawn(async move {
+                let mut buf = vec![0; 4096];
+                if let Ok(n) = socket.read(&mut buf).await {
+                    let request_str = String::from_utf8_lossy(&buf[..n]);
 
-                                // Parse HTTP request to extract method and path
-                                let method = if request_str.contains("POST") {
-                                    "POST"
-                                } else if request_str.contains("GET") {
-                                    "GET"
-                                } else {
-                                    "UNKNOWN"
-                                };
+                    // Parse HTTP request to extract method and path
+                    let method = if request_str.contains("POST") {
+                        "POST"
+                    } else if request_str.contains("GET") {
+                        "GET"
+                    } else {
+                        "UNKNOWN"
+                    };
 
-                                let path = request_str
-                                    .lines()
-                                    .next()
-                                    .and_then(|line| line.split_whitespace().nth(1))
-                                    .unwrap_or("/");
+                    let path = request_str
+                        .lines()
+                        .next()
+                        .and_then(|line| line.split_whitespace().nth(1))
+                        .unwrap_or("/");
 
-                                // Send mock response
-                                let response_body = format!(
-                                    r#"{{"jsonrpc":"2.0","result":{{"method":"{}","path":"{}","status":"ok"}},"id":"1"}}"#,
-                                    method, path
-                                );
+                    // Send mock response
+                    let response_body = format!(
+                        r#"{{"jsonrpc":"2.0","result":{{"method":"{}","path":"{}","status":"ok"}},"id":"1"}}"#,
+                        method, path
+                    );
 
-                                let response = format!(
-                                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
-                                    response_body.len(),
-                                    response_body
-                                );
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                        response_body.len(),
+                        response_body
+                    );
 
-                                let _ = socket.write_all(response.as_bytes()).await;
-                            }
-                            Err(_) => {}
-                        }
-                    });
+                    let _ = socket.write_all(response.as_bytes()).await;
                 }
-                Err(_) => {
-                    break;
-                }
-            }
+            });
         }
     });
 
@@ -109,9 +98,7 @@ async fn test_http_dispatch_allowed_request() {
             h.insert("Content-Type".to_string(), "application/json".to_string());
             h
         },
-        body: Some(
-            r#"{"jsonrpc":"2.0","id":"1","method":"version","params":{}}"#.to_string(),
-        ),
+        body: Some(r#"{"jsonrpc":"2.0","id":"1","method":"version","params":{}}"#.to_string()),
     };
 
     // Dispatch request
