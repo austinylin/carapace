@@ -3,7 +3,7 @@ use axum::{
     extract::State,
     http::{Request, StatusCode},
     response::{IntoResponse, Response},
-    routing::post,
+    routing::{get, post},
     Router,
 };
 use carapace_protocol::{HttpRequest, Message};
@@ -42,6 +42,8 @@ impl HttpProxy {
         let app = Router::new()
             .route("/rpc", post(handle_rpc))
             .route("/api/:tool/:path", post(handle_http))
+            .route("/api/v1/events", get(handle_events))
+            .route("/api/v1/check", get(handle_check))
             .fallback(post(handle_fallback)) // Catch-all for other paths like /api/v1/rpc
             .with_state(app_state);
 
@@ -267,6 +269,62 @@ async fn handle_http(
         Ok(_) => Err(HttpProxyError::WrongResponseType),
         Err(_) => Err(HttpProxyError::NoResponse),
     }
+}
+
+/// Handle SSE events endpoint (GET /api/v1/events)
+async fn handle_events(
+    State((multiplexer, connection)): State<ProxyState>,
+    request: Request<Body>,
+) -> std::result::Result<Response, HttpProxyError> {
+    let path = request.uri().path().to_string();
+    let query_string = request.uri().query().map(|q| format!("?{}", q)).unwrap_or_default();
+    let full_path = format!("{}{}", path, query_string);
+
+    let request_id = Uuid::new_v4().to_string();
+
+    // Create HttpRequest for GET request
+    let http_req = HttpRequest {
+        id: request_id.clone(),
+        tool: "signal-cli".to_string(),
+        method: "GET".to_string(),
+        path: full_path,
+        headers: HashMap::new(),
+        body: None,
+    };
+
+    // Register waiter for response
+    let rx = multiplexer.register_waiter(request_id).await;
+
+    // Send request to server
+    let msg = Message::HttpRequest(http_req);
+    connection.send(msg).await.map_err(|e| {
+        tracing::error!("Failed to send HTTP request: {}", e);
+        HttpProxyError::NoResponse
+    })?;
+
+    // Wait for response with 300 second timeout (long-lived SSE connection)
+    let response_result = timeout(tokio::time::Duration::from_secs(300), rx)
+        .await
+        .map_err(|_| HttpProxyError::NoResponse)?;
+
+    match response_result {
+        Ok(Message::HttpResponse(resp)) => {
+            let body = resp.body.unwrap_or_default();
+            Ok((
+                StatusCode::from_u16(resp.status).unwrap_or(StatusCode::OK),
+                [(axum::http::header::CONTENT_TYPE, "text/event-stream")],
+                body,
+            )
+                .into_response())
+        }
+        Ok(_) => Err(HttpProxyError::WrongResponseType),
+        Err(_) => Err(HttpProxyError::NoResponse),
+    }
+}
+
+/// Handle health check endpoint (GET /api/v1/check)
+async fn handle_check() -> std::result::Result<Response, HttpProxyError> {
+    Ok((StatusCode::OK, "OK").into_response())
 }
 
 /// Detect if response is SSE (Server-Sent Events)
