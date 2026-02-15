@@ -44,11 +44,8 @@ pub async fn sse_test(count: usize, interval_ms: u64, event_type: &str, tool: &s
 
         // Print the event (would be sent through protocol in real scenario)
         println!(
-            "\n[Event #{}] SSE: id={}, event_type={}, data={}",
-            i,
-            format!("sse-test-{}", i),
-            event_type,
-            event_data
+            "\n[Event #{}] SSE: id=sse-test-{}, event_type={}, data={}",
+            i, i, event_type, event_data
         );
 
         if i < count {
