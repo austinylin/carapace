@@ -176,8 +176,19 @@ async fn handle_http(
 
     let request_id = Uuid::new_v4().to_string();
 
-    // Extract tool from path (simplified)
-    let tool = "unknown".to_string();
+    // Extract tool from JSON body if present
+    let tool = if let Some(body) = &body_str {
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(body) {
+            json.get("tool")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+                .to_string()
+        } else {
+            "unknown".to_string()
+        }
+    } else {
+        "unknown".to_string()
+    };
 
     // Create HttpRequest
     let http_req = HttpRequest {
