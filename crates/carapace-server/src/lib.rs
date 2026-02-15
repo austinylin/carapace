@@ -14,3 +14,4 @@ pub use connection_tracker::ConnectionTracker;
 pub use error::{Result, ServerError};
 pub use http_dispatch::HttpDispatcher;
 pub use listener::Listener;
+pub use rate_limiter::RateLimiter;

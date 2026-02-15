@@ -1,15 +1,17 @@
 use carapace_protocol::{Message, MessageCodec};
 use futures::{SinkExt, StreamExt};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::net::TcpStream;
-use tokio::sync::RwLock;
+use tokio::sync::Mutex;
 use tokio_util::codec::{FramedRead, FramedWrite};
 
 use crate::error::{AgentError, Result};
 
 pub struct Connection {
-    frame_read: Arc<RwLock<Option<FramedRead<tokio::net::tcp::OwnedReadHalf, MessageCodec>>>>,
-    frame_write: Arc<RwLock<Option<FramedWrite<tokio::net::tcp::OwnedWriteHalf, MessageCodec>>>>,
+    frame_read: Arc<Mutex<Option<FramedRead<tokio::net::tcp::OwnedReadHalf, MessageCodec>>>>,
+    frame_write: Arc<Mutex<Option<FramedWrite<tokio::net::tcp::OwnedWriteHalf, MessageCodec>>>>,
+    connected: Arc<AtomicBool>,
     server_host: String,
     server_port: u16,
     reconnect_attempts: u32,
@@ -29,8 +31,9 @@ impl Connection {
         reconnect_backoff_ms: u64,
     ) -> Result<Self> {
         let connection = Connection {
-            frame_read: Arc::new(RwLock::new(None)),
-            frame_write: Arc::new(RwLock::new(None)),
+            frame_read: Arc::new(Mutex::new(None)),
+            frame_write: Arc::new(Mutex::new(None)),
+            connected: Arc::new(AtomicBool::new(false)),
             server_host: server_host.to_string(),
             server_port,
             reconnect_attempts,
@@ -47,11 +50,12 @@ impl Connection {
         for attempt in 0..self.reconnect_attempts {
             match self.try_connect().await {
                 Ok((frame_read, frame_write)) => {
-                    let mut read_lock = self.frame_read.write().await;
-                    let mut write_lock = self.frame_write.write().await;
+                    let mut read_lock = self.frame_read.lock().await;
+                    let mut write_lock = self.frame_write.lock().await;
 
                     *read_lock = Some(frame_read);
                     *write_lock = Some(frame_write);
+                    self.connected.store(true, Ordering::SeqCst);
 
                     tracing::info!(
                         "TCP connection established to {}:{} after {} attempts",
@@ -102,15 +106,17 @@ impl Connection {
 
     /// Send a message to the server
     pub async fn send(&self, msg: Message) -> Result<()> {
-        let mut write_lock = self.frame_write.write().await;
+        let mut write_lock = self.frame_write.lock().await;
 
         if let Some(writer) = write_lock.as_mut() {
             writer.send(msg).await.map_err(|e| {
                 tracing::error!("Failed to send message: {}", e);
+                self.connected.store(false, Ordering::SeqCst);
                 AgentError::SSHConnectionRefused(format!("Send failed: {}", e))
             })?;
             writer.flush().await.map_err(|e| {
                 tracing::error!("Failed to flush message: {}", e);
+                self.connected.store(false, Ordering::SeqCst);
                 AgentError::SSHConnectionRefused(format!("Flush failed: {}", e))
             })?;
             Ok(())
@@ -123,19 +129,23 @@ impl Connection {
 
     /// Receive a message from the server
     pub async fn recv(&self) -> Result<Option<Message>> {
-        let mut read_lock = self.frame_read.write().await;
+        let mut read_lock = self.frame_read.lock().await;
 
         if let Some(reader) = read_lock.as_mut() {
             match reader.next().await {
                 Some(Ok(msg)) => Ok(Some(msg)),
                 Some(Err(e)) => {
                     tracing::error!("Failed to receive message: {}", e);
+                    self.connected.store(false, Ordering::SeqCst);
                     Err(AgentError::SSHConnectionRefused(format!(
                         "Recv failed: {}",
                         e
                     )))
                 }
-                None => Ok(None),
+                None => {
+                    self.connected.store(false, Ordering::SeqCst);
+                    Ok(None)
+                }
             }
         } else {
             Err(AgentError::SSHConnectionRefused(
@@ -146,26 +156,25 @@ impl Connection {
 
     /// Kill the connection
     pub async fn kill(&self) -> Result<()> {
-        let mut read_lock = self.frame_read.write().await;
-        let mut write_lock = self.frame_write.write().await;
+        let mut read_lock = self.frame_read.lock().await;
+        let mut write_lock = self.frame_write.lock().await;
 
         *read_lock = None;
         *write_lock = None;
+        self.connected.store(false, Ordering::SeqCst);
 
         tracing::info!("TCP connection closed");
         Ok(())
     }
 
-    /// Check if connection is healthy
-    pub async fn is_healthy(&self) -> bool {
-        let read_lock = self.frame_read.read().await;
-        let write_lock = self.frame_write.read().await;
-        read_lock.is_some() && write_lock.is_some()
+    /// Check if connection is healthy (lock-free, does not block on recv/send)
+    pub fn is_healthy(&self) -> bool {
+        self.connected.load(Ordering::SeqCst)
     }
 
     /// Attempt reconnection if needed
     pub async fn reconnect_if_needed(&self) -> Result<()> {
-        if !self.is_healthy().await {
+        if !self.is_healthy() {
             tracing::warn!("Connection unhealthy, attempting reconnect");
             self.establish_connection().await
         } else {

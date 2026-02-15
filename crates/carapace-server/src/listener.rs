@@ -5,14 +5,18 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Mutex;
 use tokio_util::codec::{FramedRead, FramedWrite};
 
+use crate::audit::AuditLogger;
 use crate::cli_dispatch::CliDispatcher;
 use crate::http_dispatch::HttpDispatcher;
+use crate::rate_limiter::RateLimiter;
 use crate::Result;
 
 /// Listens for incoming messages on SSH tunnel and dispatches them
 pub struct Listener {
     cli_dispatcher: Arc<CliDispatcher>,
     http_dispatcher: Arc<HttpDispatcher>,
+    audit_logger: Arc<AuditLogger>,
+    rate_limiter: Arc<RateLimiter>,
 }
 
 impl Listener {
@@ -20,6 +24,22 @@ impl Listener {
         Listener {
             cli_dispatcher,
             http_dispatcher,
+            audit_logger: Arc::new(AuditLogger::new()),
+            rate_limiter: Arc::new(RateLimiter::new(1000, 60)),
+        }
+    }
+
+    pub fn with_audit_and_rate_limit(
+        cli_dispatcher: Arc<CliDispatcher>,
+        http_dispatcher: Arc<HttpDispatcher>,
+        audit_logger: Arc<AuditLogger>,
+        rate_limiter: Arc<RateLimiter>,
+    ) -> Self {
+        Listener {
+            cli_dispatcher,
+            http_dispatcher,
+            audit_logger,
+            rate_limiter,
         }
     }
 
@@ -94,17 +114,55 @@ impl Listener {
         sse_event_tx: Option<tokio::sync::mpsc::UnboundedSender<Message>>,
     ) -> Option<Message> {
         match msg {
-            Message::CliRequest(req) => match self.cli_dispatcher.dispatch_cli(req.clone()).await {
-                Ok(resp) => Some(Message::CliResponse(resp)),
-                Err(e) => {
-                    tracing::error!("CLI dispatch error: {}", e);
-                    Some(Message::Error(carapace_protocol::ErrorMessage {
+            Message::CliRequest(req) => {
+                // Rate limit check
+                if let Err(e) = self.rate_limiter.check_request(&req.tool).await {
+                    tracing::warn!("Rate limit exceeded for CLI tool '{}': {}", req.tool, e);
+                    self.audit_logger.log_cli_request(
+                        &req.id,
+                        &req.tool,
+                        &req.argv,
+                        false,
+                        Some("rate_limit_exceeded"),
+                    );
+                    return Some(Message::Error(carapace_protocol::ErrorMessage {
                         id: Some(req.id),
-                        code: "cli_error".to_string(),
+                        code: "rate_limited".to_string(),
                         message: e.to_string(),
-                    }))
+                    }));
                 }
-            },
+
+                // Audit log the request
+                self.audit_logger
+                    .log_cli_request(&req.id, &req.tool, &req.argv, true, None);
+
+                let start = std::time::Instant::now();
+
+                match self.cli_dispatcher.dispatch_cli(req.clone()).await {
+                    Ok(resp) => {
+                        let latency_ms = start.elapsed().as_millis() as u64;
+                        self.audit_logger.log_cli_response(
+                            &req.id,
+                            resp.exit_code,
+                            resp.stdout.len(),
+                            resp.stderr.len(),
+                            latency_ms,
+                        );
+                        Some(Message::CliResponse(resp))
+                    }
+                    Err(e) => {
+                        let latency_ms = start.elapsed().as_millis() as u64;
+                        self.audit_logger
+                            .log_cli_response(&req.id, -1, 0, 0, latency_ms);
+                        tracing::error!("CLI dispatch error: {}", e);
+                        Some(Message::Error(carapace_protocol::ErrorMessage {
+                            id: Some(req.id),
+                            code: "cli_error".to_string(),
+                            message: e.to_string(),
+                        }))
+                    }
+                }
+            }
             Message::HttpRequest(req) => {
                 tracing::info!(
                     "HTTP request received: {} {} for tool '{}'",
@@ -113,13 +171,45 @@ impl Listener {
                     req.tool
                 );
 
+                // Rate limit check
+                if let Err(e) = self.rate_limiter.check_request(&req.tool).await {
+                    tracing::warn!("Rate limit exceeded for HTTP tool '{}': {}", req.tool, e);
+                    self.audit_logger.log_http_request(
+                        &req.id,
+                        &req.tool,
+                        &req.method,
+                        &req.path,
+                        false,
+                        Some("rate_limit_exceeded"),
+                    );
+                    return Some(Message::Error(carapace_protocol::ErrorMessage {
+                        id: Some(req.id),
+                        code: "rate_limited".to_string(),
+                        message: e.to_string(),
+                    }));
+                }
+
+                // Audit log the request
+                self.audit_logger.log_http_request(
+                    &req.id,
+                    &req.tool,
+                    &req.method,
+                    &req.path,
+                    true,
+                    None,
+                );
+
+                let start = std::time::Instant::now();
+
                 match self
                     .http_dispatcher
                     .dispatch_http(req.clone(), sse_event_tx)
                     .await
                 {
                     Ok(Some(response)) => {
-                        // Non-SSE response: return normally
+                        let latency_ms = start.elapsed().as_millis() as u64;
+                        self.audit_logger
+                            .log_http_response(&req.id, response.status, latency_ms);
                         tracing::info!(
                             "HTTP request {} succeeded with status {}",
                             response.id,
@@ -128,11 +218,16 @@ impl Listener {
                         Some(Message::HttpResponse(response))
                     }
                     Ok(None) => {
-                        // SSE response: events were already sent through sse_event_tx
+                        let latency_ms = start.elapsed().as_millis() as u64;
+                        self.audit_logger
+                            .log_http_response(&req.id, 200, latency_ms);
                         tracing::info!("SSE streaming completed for request {}", req.id);
                         None
                     }
                     Err(e) => {
+                        let latency_ms = start.elapsed().as_millis() as u64;
+                        self.audit_logger
+                            .log_http_response(&req.id, 500, latency_ms);
                         tracing::error!("HTTP dispatch failed for {}: {}", req.id, e);
                         Some(Message::Error(carapace_protocol::ErrorMessage {
                             id: Some(req.id),

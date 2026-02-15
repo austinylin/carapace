@@ -1,5 +1,7 @@
 use carapace_policy::PolicyConfig;
-use carapace_server::{CliDispatcher, ConnectionTracker, HttpDispatcher, Listener, Result};
+use carapace_server::{
+    AuditLogger, CliDispatcher, ConnectionTracker, HttpDispatcher, Listener, RateLimiter, Result,
+};
 use clap::Parser;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -48,6 +50,25 @@ async fn main() -> Result<()> {
     // Create HTTP dispatcher with policy
     let http_dispatcher = Arc::new(HttpDispatcher::with_policy(policy));
 
+    // Create audit logger
+    let audit_log_file = std::env::var("CARAPACE_AUDIT_LOG").unwrap_or_else(|_| String::new());
+    let audit_logger = Arc::new(if audit_log_file.is_empty() {
+        AuditLogger::new()
+    } else {
+        tracing::info!("Audit logging to file: {}", audit_log_file);
+        AuditLogger::with_config(
+            true,
+            true,
+            false,
+            Some(audit_log_file),
+            100 * 1024 * 1024,
+            10,
+        )
+    });
+
+    // Create rate limiter (default: 1000 requests per 60 seconds per tool)
+    let rate_limiter = Arc::new(RateLimiter::new(1000, 60));
+
     // Create connection tracker
     let connection_tracker = ConnectionTracker::new();
 
@@ -81,11 +102,19 @@ async fn main() -> Result<()> {
                     let http_dispatcher = http_dispatcher.clone();
                     let tracker_clone = connection_tracker.clone();
 
+                    let audit_logger = audit_logger.clone();
+                    let rate_limiter = rate_limiter.clone();
+
                     tokio::spawn(async move {
                         tracker_clone.register(addr).await;
 
                         let (read, write) = stream.into_split();
-                        let listener = Listener::new(cli_dispatcher, http_dispatcher);
+                        let listener = Listener::with_audit_and_rate_limit(
+                            cli_dispatcher,
+                            http_dispatcher,
+                            audit_logger,
+                            rate_limiter,
+                        );
 
                         if let Err(e) = listener.listen(read, write).await {
                             tracing::error!("Connection error for {}: {}", addr, e);
@@ -110,7 +139,12 @@ async fn main() -> Result<()> {
             .expect("Failed to parse dummy address");
         connection_tracker.register(stdin_addr).await;
 
-        let listener = Listener::new(cli_dispatcher, http_dispatcher);
+        let listener = Listener::with_audit_and_rate_limit(
+            cli_dispatcher,
+            http_dispatcher,
+            audit_logger,
+            rate_limiter,
+        );
         let result = listener
             .listen(tokio::io::stdin(), tokio::io::stdout())
             .await;

@@ -61,7 +61,7 @@ async fn main() -> AgentResult<()> {
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
 
-            if !connection_monitor.is_healthy().await {
+            if !connection_monitor.is_healthy() {
                 tracing::warn!(
                     "Connection unhealthy, attempting automatic reconnection to {}:{}",
                     server_host,
