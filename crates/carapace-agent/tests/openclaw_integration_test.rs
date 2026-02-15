@@ -49,55 +49,45 @@ impl MockSignalCli {
         let server_url = format!("http://{}", addr);
 
         tokio::spawn(async move {
-            loop {
-                match listener.accept().await {
-                    Ok((mut socket, _)) => {
-                        tokio::spawn(async move {
-                            // Handle multiple requests on this connection
-                            loop {
-                                let mut buf = vec![0; 8192];
-                                match socket.read(&mut buf).await {
-                                    Ok(0) => break, // Connection closed
-                                    Ok(n) => {
-                                        let request = String::from_utf8_lossy(&buf[..n]);
-                                        eprintln!("Mock signal-cli received:\n{}", request);
+            while let Ok((mut socket, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    // Handle multiple requests on this connection
+                    let mut buf = vec![0; 8192];
+                    while let Ok(n) = socket.read(&mut buf).await {
+                        if n == 0 {
+                            break; // Connection closed
+                        }
+                        let request = String::from_utf8_lossy(&buf[..n]);
+                        eprintln!("Mock signal-cli received:\n{}", request);
 
-                                        // Route to appropriate handler
-                                        if request.contains("GET /api/v1/events") {
-                                            // SSE is special - write events and close connection
-                                            if socket
-                                                .write_all(
-                                                    MockSignalCli::handle_events_request(&request)
-                                                        .as_bytes(),
-                                                )
-                                                .await
-                                                .is_err()
-                                            {
-                                                break;
-                                            }
-                                            // For SSE, close connection after sending events (simulates stream ending)
-                                            drop(socket);
-                                            break;
-                                        } else {
-                                            let response = if request.contains("POST /api/v1/rpc") {
-                                                MockSignalCli::handle_rpc_request(&request)
-                                            } else {
-                                                MockSignalCli::handle_default_request()
-                                            };
-
-                                            if socket.write_all(response.as_bytes()).await.is_err()
-                                            {
-                                                break;
-                                            }
-                                        }
-                                    }
-                                    Err(_) => break,
-                                }
+                        // Route to appropriate handler
+                        if request.contains("GET /api/v1/events") {
+                            // SSE is special - write events and close connection
+                            if socket
+                                .write_all(
+                                    MockSignalCli::handle_events_request(&request).as_bytes(),
+                                )
+                                .await
+                                .is_err()
+                            {
+                                break;
                             }
-                        });
+                            // For SSE, close connection after sending events (simulates stream ending)
+                            drop(socket);
+                            break;
+                        } else {
+                            let response = if request.contains("POST /api/v1/rpc") {
+                                MockSignalCli::handle_rpc_request(&request)
+                            } else {
+                                MockSignalCli::handle_default_request()
+                            };
+
+                            if socket.write_all(response.as_bytes()).await.is_err() {
+                                break;
+                            }
+                        }
                     }
-                    Err(_) => break,
-                }
+                });
             }
         });
 
@@ -157,7 +147,7 @@ impl MockSignalCli {
         //   "envelope": { message details }
         // }
 
-        let events = vec![
+        let events = [
             // Event 1: Incoming message
             "id:1\nevent:message\ndata:{\"account\":\"+12242120288\",\"envelope\":{\"timestamp\":1707920000000,\"source\":\"+12025551234\",\"sourceDevice\":1,\"message\":{\"body\":\"Hello from Signal\"},\"expirationTime\":0}}\n\n",
             // Event 2: Keep-alive (colon at start means comment, receiver ignores it)
@@ -166,7 +156,7 @@ impl MockSignalCli {
             "id:2\nevent:message\ndata:{\"account\":\"+12242120288\",\"envelope\":{\"timestamp\":1707920001000,\"source\":\"+12025559999\",\"sourceDevice\":1,\"message\":{\"body\":\"Another message\"},\"expirationTime\":0}}\n\n",
         ];
 
-        let body = events.join("");
+        let body = events.concat();
         format!(
             "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nContent-Length: {}\r\n\r\n{}",
             body.len(),
@@ -329,8 +319,11 @@ async fn test_openclaw_send_message() {
     let multiplexer = Arc::new(Multiplexer::new());
 
     let (host, port) = {
-        let parts: Vec<&str> = server_addr.split(':').collect();
-        (parts[0].to_string(), parts[1].parse::<u16>().unwrap())
+        let mut parts = server_addr.split(':');
+        (
+            parts.next().expect("No host").to_string(),
+            parts.next().expect("No port").parse::<u16>().unwrap(),
+        )
     };
 
     let connection = Arc::new(
@@ -342,13 +335,8 @@ async fn test_openclaw_send_message() {
     let connection_read = connection.clone();
     let multiplexer_response = multiplexer.clone();
     tokio::spawn(async move {
-        loop {
-            match connection_read.recv().await {
-                Ok(Some(msg)) => {
-                    multiplexer_response.handle_response(msg).await;
-                }
-                _ => break,
-            }
+        while let Ok(Some(msg)) = connection_read.recv().await {
+            multiplexer_response.handle_response(msg).await;
         }
     });
 
@@ -418,8 +406,11 @@ async fn test_openclaw_send_typing_indicator() {
 
     let multiplexer = Arc::new(Multiplexer::new());
     let (host, port) = {
-        let parts: Vec<&str> = server_addr.split(':').collect();
-        (parts[0].to_string(), parts[1].parse::<u16>().unwrap())
+        let mut parts = server_addr.split(':');
+        (
+            parts.next().expect("No host").to_string(),
+            parts.next().expect("No port").parse::<u16>().unwrap(),
+        )
     };
 
     let connection = Arc::new(
@@ -431,13 +422,8 @@ async fn test_openclaw_send_typing_indicator() {
     let connection_read = connection.clone();
     let multiplexer_response = multiplexer.clone();
     tokio::spawn(async move {
-        loop {
-            match connection_read.recv().await {
-                Ok(Some(msg)) => {
-                    multiplexer_response.handle_response(msg).await;
-                }
-                _ => break,
-            }
+        while let Ok(Some(msg)) = connection_read.recv().await {
+            multiplexer_response.handle_response(msg).await;
         }
     });
 
@@ -494,8 +480,11 @@ async fn test_openclaw_receive_events_sse() {
 
     let multiplexer = Arc::new(Multiplexer::new());
     let (host, port) = {
-        let parts: Vec<&str> = server_addr.split(':').collect();
-        (parts[0].to_string(), parts[1].parse::<u16>().unwrap())
+        let mut parts = server_addr.split(':');
+        (
+            parts.next().expect("No host").to_string(),
+            parts.next().expect("No port").parse::<u16>().unwrap(),
+        )
     };
 
     let connection = Arc::new(
@@ -507,13 +496,8 @@ async fn test_openclaw_receive_events_sse() {
     let connection_read = connection.clone();
     let multiplexer_response = multiplexer.clone();
     tokio::spawn(async move {
-        loop {
-            match connection_read.recv().await {
-                Ok(Some(msg)) => {
-                    multiplexer_response.handle_response(msg).await;
-                }
-                _ => break,
-            }
+        while let Ok(Some(msg)) = connection_read.recv().await {
+            multiplexer_response.handle_response(msg).await;
         }
     });
 
@@ -566,8 +550,11 @@ async fn test_openclaw_blocked_number() {
 
     let multiplexer = Arc::new(Multiplexer::new());
     let (host, port) = {
-        let parts: Vec<&str> = server_addr.split(':').collect();
-        (parts[0].to_string(), parts[1].parse::<u16>().unwrap())
+        let mut parts = server_addr.split(':');
+        (
+            parts.next().expect("No host").to_string(),
+            parts.next().expect("No port").parse::<u16>().unwrap(),
+        )
     };
 
     let connection = Arc::new(
@@ -579,13 +566,8 @@ async fn test_openclaw_blocked_number() {
     let connection_read = connection.clone();
     let multiplexer_response = multiplexer.clone();
     tokio::spawn(async move {
-        loop {
-            match connection_read.recv().await {
-                Ok(Some(msg)) => {
-                    multiplexer_response.handle_response(msg).await;
-                }
-                _ => break,
-            }
+        while let Ok(Some(msg)) = connection_read.recv().await {
+            multiplexer_response.handle_response(msg).await;
         }
     });
 
@@ -644,8 +626,11 @@ async fn test_openclaw_concurrent_requests() {
 
     let multiplexer = Arc::new(Multiplexer::new());
     let (host, port) = {
-        let parts: Vec<&str> = server_addr.split(':').collect();
-        (parts[0].to_string(), parts[1].parse::<u16>().unwrap())
+        let mut parts = server_addr.split(':');
+        (
+            parts.next().expect("No host").to_string(),
+            parts.next().expect("No port").parse::<u16>().unwrap(),
+        )
     };
 
     let connection = Arc::new(
@@ -657,13 +642,8 @@ async fn test_openclaw_concurrent_requests() {
     let connection_read = connection.clone();
     let multiplexer_response = multiplexer.clone();
     tokio::spawn(async move {
-        loop {
-            match connection_read.recv().await {
-                Ok(Some(msg)) => {
-                    multiplexer_response.handle_response(msg).await;
-                }
-                _ => break,
-            }
+        while let Ok(Some(msg)) = connection_read.recv().await {
+            multiplexer_response.handle_response(msg).await;
         }
     });
 

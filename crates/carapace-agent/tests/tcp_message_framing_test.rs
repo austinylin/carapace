@@ -100,8 +100,8 @@ async fn test_connection_send_multiple_messages() {
             let msg = frame_read
                 .next()
                 .await
-                .expect(&format!("Message {} not received", i))
-                .expect(&format!("Failed to deserialize message {}", i));
+                .unwrap_or_else(|| panic!("Message {} not received", i))
+                .unwrap_or_else(|_| panic!("Failed to deserialize message {}", i));
 
             match msg {
                 Message::CliRequest(req) => {
@@ -134,10 +134,12 @@ async fn test_connection_send_multiple_messages() {
             cwd: "/".to_string(),
         });
 
-        connection.send(req).await.expect(&format!(
-            "Failed to send message {} - missing flush() would cause this",
-            i
-        ));
+        connection.send(req).await.unwrap_or_else(|_| {
+            panic!(
+                "Failed to send message {} - missing flush() would cause this",
+                i
+            )
+        });
     }
 
     // Wait for server to receive all messages
@@ -280,7 +282,7 @@ async fn test_connection_send_rapid_messages() {
         connection
             .send(req)
             .await
-            .expect(&format!("Failed to send rapid message {}", i));
+            .unwrap_or_else(|_| panic!("Failed to send rapid message {}", i));
     }
 
     // Wait for server to verify it received all messages

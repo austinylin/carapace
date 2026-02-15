@@ -372,7 +372,7 @@ async fn test_transient_error_recovery() {
                     cwd: "/".to_string(),
                 });
 
-                if let Ok(_) = frame_write.send(response).await {
+                if frame_write.send(response).await.is_ok() {
                     let _ = frame_write.flush().await;
                     let _ = tx.send(true);
                 }
