@@ -53,7 +53,10 @@ impl Listener {
 
                     // Dispatch message
                     if let Some(response) = self.dispatch_message(msg).await {
-                        frame_write.send(response).await?;
+                        if let Err(e) = frame_write.send(response).await {
+                            tracing::error!("Failed to send response: {}", e);
+                            // Continue processing messages instead of closing connection
+                        }
                     }
                 }
                 Err(e) => {
