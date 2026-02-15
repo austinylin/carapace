@@ -27,6 +27,17 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio_util::codec::{FramedRead, FramedWrite};
 
+/// Extract request ID from JSON-RPC body for echoing in response
+fn extract_request_id(request: &str) -> Option<String> {
+    if let Some(start) = request.find("\"id\":\"") {
+        let after_prefix = &request[start + 6..];
+        if let Some(end) = after_prefix.find('"') {
+            return Some(after_prefix[..end].to_string());
+        }
+    }
+    None
+}
+
 /// Mock signal-cli server with real API responses
 struct MockSignalCli {
     addr: String,
@@ -84,25 +95,29 @@ impl MockSignalCli {
     }
 
     fn handle_rpc_request(request: &str) -> String {
-        // Parse to detect method
+        // Extract the request ID from the JSON body to echo back in response
+        let id = extract_request_id(request).unwrap_or_else(|| "1".to_string());
+
+        // Parse to detect method from actual OpenClaw request format
         let response_body = if request.contains("\"method\":\"send\"") {
-            // signal-cli send response
-            r#"{"jsonrpc":"2.0","result":{"timestamp":1707920000000},"id":"1"}"#
+            // send response: returns timestamp (milliseconds since epoch)
+            // This matches signal-cli HTTP API response
+            format!(r#"{{"jsonrpc":"2.0","result":{{"timestamp":1707920000000}},"id":"{id}"}}"#)
         } else if request.contains("\"method\":\"version\"") {
-            // signal-cli version response
-            r#"{"jsonrpc":"2.0","result":{"version":"0.13.24"},"id":"1"}"#
+            // version response: returns version string
+            format!(r#"{{"jsonrpc":"2.0","result":{{"version":"0.13.24"}},"id":"{id}"}}"#)
         } else if request.contains("\"method\":\"sendTyping\"") {
-            // sendTyping response
-            r#"{"jsonrpc":"2.0","result":null,"id":"1"}"#
+            // sendTyping response: null result
+            format!(r#"{{"jsonrpc":"2.0","result":null,"id":"{id}"}}"#)
         } else if request.contains("\"method\":\"sendReceipt\"") {
-            // sendReceipt response
-            r#"{"jsonrpc":"2.0","result":null,"id":"1"}"#
+            // sendReceipt response: null result
+            format!(r#"{{"jsonrpc":"2.0","result":null,"id":"{id}"}}"#)
         } else if request.contains("\"method\":\"sendReaction\"") {
-            // sendReaction response
-            r#"{"jsonrpc":"2.0","result":null,"id":"1"}"#
+            // sendReaction response: returns timestamp
+            format!(r#"{{"jsonrpc":"2.0","result":{{"timestamp":1707920000000}},"id":"{id}"}}"#)
         } else {
-            // Unknown method
-            r#"{"jsonrpc":"2.0","error":{"code":-32601,"message":"Method not found"},"id":"1"}"#
+            // Unknown method - return JSON-RPC error per spec
+            format!(r#"{{"jsonrpc":"2.0","error":{{"code":-32601,"message":"Method not found"}},"id":"{id}"}}"#)
         };
 
         format!(
@@ -303,8 +318,12 @@ async fn test_openclaw_send_message() {
 
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-    // Simulate OpenClaw sending a message with array recipient format
-    let request_id = "openclaw-send-1".to_string();
+    // Simulate OpenClaw sending a message
+    // Format from actual OpenClaw src/signal/send.ts buildTargetParams():
+    // - recipient is an ARRAY: ["+12025551234"]
+    // - message is the text
+    // - OpenClaw uses UUID string for request ID
+    let request_id = "550e8400-e29b-41d4-a716-446655440000".to_string();
     let rx = multiplexer.register_waiter(request_id.clone()).await;
 
     let http_req = carapace_protocol::HttpRequest {
@@ -317,13 +336,14 @@ async fn test_openclaw_send_message() {
             h.insert("Content-Type".to_string(), "application/json".to_string());
             h
         },
+        // Real OpenClaw request format from src/signal/send.ts
         body: Some(
-            r#"{"jsonrpc":"2.0","id":"1","method":"send","params":{"recipient":["+12025551234"],"message":"Hello from OpenClaw"}}"#
+            r#"{"jsonrpc":"2.0","id":"550e8400-e29b-41d4-a716-446655440000","method":"send","params":{"message":"Hello from OpenClaw","recipient":["+12025551234"]}}"#
                 .to_string(),
         ),
     };
 
-    eprintln!("Sending message request...");
+    eprintln!("Sending message request (UUID ID)...");
     connection
         .send(Message::HttpRequest(http_req))
         .await
@@ -340,7 +360,9 @@ async fn test_openclaw_send_message() {
             eprintln!("✓ Response received: status={}", resp.status);
             assert_eq!(resp.status, 200);
             assert!(resp.body.is_some());
-            assert!(resp.body.unwrap().contains("timestamp"));
+            let body = resp.body.unwrap();
+            assert!(body.contains("timestamp"), "Expected timestamp in response: {}", body);
+            assert!(body.contains("550e8400-e29b-41d4-a716-446655440000"), "Expected UUID ID echoed back");
         }
         _ => panic!("Did not receive expected response"),
     }
@@ -383,7 +405,7 @@ async fn test_openclaw_send_typing_indicator() {
 
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-    let request_id = "openclaw-typing-1".to_string();
+    let request_id = "550e8400-e29b-41d4-a716-446655440001".to_string();
     let rx = multiplexer.register_waiter(request_id.clone()).await;
 
     let http_req = carapace_protocol::HttpRequest {
@@ -396,8 +418,10 @@ async fn test_openclaw_send_typing_indicator() {
             h.insert("Content-Type".to_string(), "application/json".to_string());
             h
         },
+        // Real OpenClaw format from src/signal/send.ts sendTypingSignal()
+        // Uses recipient array format
         body: Some(
-            r#"{"jsonrpc":"2.0","id":"1","method":"sendTyping","params":{"recipient":["+12025551234"],"typing":true}}"#
+            r#"{"jsonrpc":"2.0","id":"550e8400-e29b-41d4-a716-446655440001","method":"sendTyping","params":{"recipient":["+12025551234"]}}"#
                 .to_string(),
         ),
     };
@@ -418,6 +442,8 @@ async fn test_openclaw_send_typing_indicator() {
         Ok(Ok(Message::HttpResponse(resp))) => {
             eprintln!("✓ Typing indicator sent: status={}", resp.status);
             assert_eq!(resp.status, 200);
+            // sendTyping returns null result
+            assert!(resp.body.is_some());
         }
         _ => panic!("Did not receive expected response"),
     }
@@ -460,10 +486,10 @@ async fn test_openclaw_receive_events_sse() {
 
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-    let request_id = "openclaw-events-1".to_string();
+    let request_id = "550e8400-e29b-41d4-a716-446655440003".to_string();
     let rx = multiplexer.register_waiter(request_id.clone()).await;
 
-    // Request SSE stream for events
+    // Request SSE stream for events (from OpenClaw src/signal/client.ts streamSignalEvents)
     let http_req = carapace_protocol::HttpRequest {
         id: request_id.clone(),
         tool: "signal-cli".to_string(),
@@ -537,10 +563,11 @@ async fn test_openclaw_blocked_number() {
 
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-    let request_id = "openclaw-blocked-1".to_string();
+    let request_id = "550e8400-e29b-41d4-a716-446655440002".to_string();
     let rx = multiplexer.register_waiter(request_id.clone()).await;
 
     // Try to send to non-US number (policy allows +1* only)
+    // Real OpenClaw format
     let http_req = carapace_protocol::HttpRequest {
         id: request_id.clone(),
         tool: "signal-cli".to_string(),
@@ -552,12 +579,12 @@ async fn test_openclaw_blocked_number() {
             h
         },
         body: Some(
-            r#"{"jsonrpc":"2.0","id":"1","method":"send","params":{"recipient":["+442071234567"],"message":"International number"}}"#
+            r#"{"jsonrpc":"2.0","id":"550e8400-e29b-41d4-a716-446655440002","method":"send","params":{"message":"International number","recipient":["+442071234567"]}}"#
                 .to_string(),
         ),
     };
 
-    eprintln!("Sending to blocked number...");
+    eprintln!("Sending to blocked number (+44 UK)...");
     connection
         .send(Message::HttpRequest(http_req))
         .await
@@ -619,7 +646,7 @@ async fn test_openclaw_concurrent_requests() {
 
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-    // Send 5 concurrent requests
+    // Send 5 concurrent requests - each with different UUID ID
     let mut handles = vec![];
 
     for i in 0..5 {
@@ -627,11 +654,12 @@ async fn test_openclaw_concurrent_requests() {
         let mux = multiplexer.clone();
 
         let handle = tokio::spawn(async move {
-            let request_id = format!("concurrent-{}", i);
+            // Generate unique UUID-like ID for each request (matching OpenClaw format)
+            let request_id = format!("550e8400-e29b-41d4-a716-44665544000{}", i);
             let rx = mux.register_waiter(request_id.clone()).await;
 
             let http_req = carapace_protocol::HttpRequest {
-                id: request_id,
+                id: request_id.clone(),
                 tool: "signal-cli".to_string(),
                 method: "POST".to_string(),
                 path: "/api/v1/rpc".to_string(),
@@ -640,8 +668,9 @@ async fn test_openclaw_concurrent_requests() {
                     h.insert("Content-Type".to_string(), "application/json".to_string());
                     h
                 },
+                // Real OpenClaw version request format
                 body: Some(
-                    r#"{"jsonrpc":"2.0","id":"1","method":"version","params":{}}"#.to_string(),
+                    format!(r#"{{"jsonrpc":"2.0","id":"{}","method":"version","params":{{}}}}"#, request_id),
                 ),
             };
 
