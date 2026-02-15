@@ -177,6 +177,25 @@ fn print_message(count: usize, msg_type: String, json: &serde_json::Value) {
                 println!("Body: {}", preview);
             }
         }
+        "SseEvent" => {
+            if let Some(id) = json.get("id").and_then(|v| v.as_str()) {
+                println!("Request ID: {}", id);
+            }
+            if let Some(tool) = json.get("tool").and_then(|v| v.as_str()) {
+                println!("Tool: {}", tool);
+            }
+            if let Some(event) = json.get("event").and_then(|v| v.as_str()) {
+                println!("Event type: {}", event);
+            }
+            if let Some(data) = json.get("data").and_then(|v| v.as_str()) {
+                let preview = if data.len() > 150 {
+                    format!("{}...", &data[..150])
+                } else {
+                    data.to_string()
+                };
+                println!("Data: {}", preview);
+            }
+        }
         "Error" => {
             if let Some(code) = json.get("code").and_then(|v| v.as_str()) {
                 println!("Error code: {}", code);
