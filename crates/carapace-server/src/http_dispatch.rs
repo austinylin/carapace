@@ -169,21 +169,21 @@ impl HttpDispatcher {
             .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
             .collect();
 
-        // For SSE endpoints, read body with timeout but return empty if it times out
-        // SSE streams should start immediately with headers, the actual event data flows later
+        // For SSE endpoints, wait a bit for initial events before returning
+        // But don't wait forever - give the client a chance to receive initial data
         let body = if is_sse_endpoint {
-            eprintln!("DEBUG: SSE endpoint detected - not waiting for full stream");
-            // For SSE, don't try to read the entire body - that defeats the purpose of streaming
-            // The client should get the response immediately and start reading events
-            // Return empty body since the actual events will stream directly
+            eprintln!("DEBUG: SSE endpoint detected - waiting 2 seconds for initial events");
+            // For SSE, wait a short time for initial events to arrive
+            // This allows the first batch of events to be sent immediately rather than
+            // delaying until the next event arrives (which could be minutes later)
             tokio::time::timeout(
-                std::time::Duration::from_millis(100),
+                std::time::Duration::from_secs(2),
                 response.text(),
             )
             .await
             .ok()
             .and_then(|r| r.ok())
-            .or(Some(String::new())) // If timeout, return empty string instead of None
+            .or(Some(String::new())) // If timeout or error, return empty string
         } else {
             eprintln!("DEBUG: Regular endpoint - buffering response body normally");
             response.text().await.ok()
