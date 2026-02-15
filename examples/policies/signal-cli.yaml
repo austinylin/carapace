@@ -3,12 +3,14 @@ tools:
     type: http
     upstream: "http://127.0.0.1:18080"
 
-    # Allow only safe read/send operations
+    # Allow signal-cli operations called by OpenClaw
     jsonrpc_allow_methods:
-      - send
-      - receive
-      - listMessages
-      - version
+      - send              # Send message to recipient/group/username
+      - sendTyping        # Send typing indicator
+      - sendReceipt       # Send read/viewed receipt
+      - sendReaction      # Send/remove emoji reaction
+      - getAttachment     # Download message attachment
+      - version           # Get signal-cli version
 
     # Deny dangerous operations
     jsonrpc_deny_methods:
@@ -16,12 +18,34 @@ tools:
       - removeAccount
       - unregister
 
-    # Filter on phone numbers - RESTRICT TO ONLY +12246192888
+    # Filter on phone numbers for sending methods
     jsonrpc_param_filters:
+      # send: recipient field is an array, policy filters first element
       send:
-        field: "recipientNumber"
+        field: "recipient"
         allow_patterns:
-          - "+12246192888"     # Only allow sending to this number
+          - "+1*"              # Allow all US numbers (customize as needed)
+        deny_patterns: []
+
+      # sendTyping: typing indicator to recipient
+      sendTyping:
+        field: "recipient"
+        allow_patterns:
+          - "+1*"
+        deny_patterns: []
+
+      # sendReceipt: read receipt to recipient
+      sendReceipt:
+        field: "recipient"
+        allow_patterns:
+          - "+1*"
+        deny_patterns: []
+
+      # sendReaction: reactions use plural "recipients" field
+      sendReaction:
+        field: "recipients"    # Note: plural form for this method
+        allow_patterns:
+          - "+1*"
         deny_patterns: []
 
     rate_limit:
@@ -34,4 +58,5 @@ tools:
       enabled: true
       log_body: false  # Set to true to log full JSON-RPC requests (debug mode)
       redact_patterns:
-        - "recipientNumber"  # Optionally redact phone numbers in audit logs
+        - "recipient"     # Redact phone numbers in audit logs
+        - "recipients"    # Redact recipients array
