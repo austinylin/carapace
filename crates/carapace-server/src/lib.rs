@@ -1,6 +1,7 @@
 pub mod audit;
 pub mod cli_dispatch;
 pub mod config;
+pub mod debug_server;
 pub mod error;
 pub mod http_dispatch;
 pub mod listener;

@@ -26,8 +26,8 @@ enum Commands {
         #[arg(long, default_value = "localhost")]
         host: String,
 
-        /// Server port (default: 8765)
-        #[arg(long, default_value = "8765")]
+        /// Debug server port (default: 8766)
+        #[arg(long, default_value = "8766")]
         port: u16,
 
         /// Output format: json, text (default: text)
@@ -41,8 +41,8 @@ enum Commands {
         #[arg(long, default_value = "localhost")]
         host: String,
 
-        /// Server port (default: 8765)
-        #[arg(long, default_value = "8765")]
+        /// Debug server port (default: 8766)
+        #[arg(long, default_value = "8766")]
         port: u16,
 
         /// Watch mode: refresh every N seconds

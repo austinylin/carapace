@@ -10,6 +10,10 @@ struct Args {
     /// Listen on TCP socket (e.g., 127.0.0.1:8765) instead of stdin/stdout
     #[arg(long)]
     listen: Option<String>,
+
+    /// Listen on HTTP socket for debug endpoints (e.g., 127.0.0.1:8766)
+    #[arg(long)]
+    debug_listen: Option<String>,
 }
 
 #[tokio::main]
@@ -43,6 +47,20 @@ async fn main() -> Result<()> {
 
     // Create HTTP dispatcher with policy
     let http_dispatcher = Arc::new(HttpDispatcher::with_policy(policy));
+
+    // Start debug HTTP server if requested
+    if let Some(debug_addr) = args.debug_listen {
+        let debug_addr_parsed: std::net::SocketAddr = debug_addr.parse().map_err(|e| {
+            carapace_server::ServerError::ConfigError(format!("Invalid debug address: {}", e))
+        })?;
+        tokio::spawn(async move {
+            if let Err(e) =
+                carapace_server::debug_server::start_debug_server(debug_addr_parsed).await
+            {
+                tracing::error!("Debug server error: {}", e);
+            }
+        });
+    }
 
     if let Some(listen_addr) = args.listen {
         // TCP mode: listen on socket and accept multiple connections
