@@ -12,6 +12,10 @@ Carapace can provide hard policy enforcement for `gog`, but Gmail introduces cha
 
 ## Architecture Overview
 
+There are two distinct data flows to support: **ad-hoc CLI queries** (agent initiates) and **real-time push notifications** (Gmail initiates via Pub/Sub). Both need content filtering.
+
+### Flow A: Ad-hoc CLI Queries (agent-initiated)
+
 ```
 UNTRUSTED VM (OpenClaw agent)              TRUSTED HOST (credentials)
 ┌─────────────────────────────┐            ┌──────────────────────────────────────┐
@@ -28,6 +32,55 @@ UNTRUSTED VM (OpenClaw agent)              TRUSTED HOST (credentials)
 │                             │            │  GOG_KEYRING_PASSWORD (in env_inject) │
 └─────────────────────────────┘            └──────────────────────────────────────┘
 ```
+
+### Flow B: Gmail Watch / Pub/Sub (Gmail-initiated, real-time)
+
+This is how OpenClaw primarily uses Gmail. It's not optional -- the Gateway auto-starts
+`gog gmail watch serve` on boot when configured and auto-renews the 7-day watch expiry.
+OpenClaw has dedicated source files for this: `gmail-watcher.ts`, `gmail-watcher-lifecycle.ts`,
+`gmail-ops.ts`. Real users run this in production.
+
+```
+Gmail inbox change
+    │
+    ▼
+Google Pub/Sub push notification (minimal: email + historyId)
+    │
+    ▼
+┌──────────────────────────── TRUSTED HOST ─────────────────────────────────────┐
+│                                                                               │
+│  gog gmail watch serve (long-lived daemon)                                    │
+│    - Enriches notification via Gmail History API (from, subject, snippet, body)│
+│    - Posts enriched JSON to local webhook                                      │
+│    │                                                                          │
+│    ▼                                                                          │
+│  carapace-server webhook endpoint (NEW)                                       │
+│    1. ** content filter ** on notification payload                             │
+│    2. Drop/redact messages matching deny patterns (password resets, etc.)      │
+│    3. Push filtered events as SseEvent to connected agents                    │
+│                                                                               │
+│  ~/.config/gog/  (OAuth tokens, never leave trusted host)                     │
+└───────────────────────────────────────────┬───────────────────────────────────┘
+                                            │ TCP (SseEvent)
+                                            ▼
+┌──────────────────────── UNTRUSTED VM ─────────────────────────────────────────┐
+│                                                                               │
+│  carapace-agent receives SseEvent                                             │
+│    │                                                                          │
+│    ▼                                                                          │
+│  OpenClaw hooks endpoint (http://127.0.0.1:18789/hooks/gmail)                 │
+│    - AI processes filtered email notification                                 │
+│    - Summarize / classify / draft reply / route to chat                       │
+│                                                                               │
+└───────────────────────────────────────────────────────────────────────────────┘
+```
+
+Key insight: `gog gmail watch serve` posts enriched notifications (from, subject,
+snippet, body) to a webhook URL. Instead of pointing it directly at OpenClaw's hooks
+endpoint (which would bypass Carapace entirely), we point it at a Carapace webhook
+receiver that applies content filters, then pushes filtered events over the existing
+SseEvent channel to agents. The same `ResponseFilter` framework from Phase 2 handles
+both flows.
 
 ## Phase 1: Basic gogcli Policy (argv + env_inject)
 
@@ -489,24 +542,150 @@ This can be referenced from tool policies via `!include` or a policy-level `patt
 
 ---
 
-## Phase 5 (Future): Gmail Watch / Pub/Sub Integration
+## Phase 5: Gmail Watch / Pub/Sub Integration
 
-The `gog gmail watch serve` command runs a long-lived HTTP server that receives push notifications from Google Pub/Sub. This doesn't fit the request/response CLI model.
+This is not a "future nice-to-have" -- it's how OpenClaw primarily uses Gmail. The
+Gateway auto-starts `gog gmail watch serve` on boot when configured. OpenClaw has
+dedicated source files (`gmail-watcher.ts`, `gmail-watcher-lifecycle.ts`, `gmail-ops.ts`,
+`gmail-setup-utils.ts`) and auto-renews the 7-day watch expiry. Skipping this phase
+means Carapace can't protect the most common Gmail flow.
 
-Options (not for now, but worth noting architecturally):
+### 5a. Webhook receiver in carapace-server
 
-**Option A: Separate daemon with Carapace HTTP proxy**
-- Run `gog gmail watch serve --hook-url http://localhost:XXXX` on the trusted host
-- Run a Carapace HTTP tool that proxies webhook events to the untrusted VM
-- Response filters can inspect/filter events before forwarding
+Add a lightweight HTTP endpoint to carapace-server that receives POST webhooks from
+`gog gmail watch serve`. This runs alongside the existing TCP listener.
 
-**Option B: SSE bridge**
-- Write a small bridge that converts `gog gmail watch` events into Carapace SseEvent messages
-- Leverage existing SSE streaming infrastructure in the protocol
+```rust
+// New: carapace-server/src/webhook_receiver.rs
+//
+// Starts a small HTTP server (e.g., axum or hyper) on a configurable port.
+// Receives POST /hooks/{tool} with JSON body.
+// Validates hook token.
+// Runs the payload through the same ResponseFilter chain.
+// Pushes filtered events as SseEvent to connected agents.
 
-**Option C: Agent-side polling**
-- Instead of push, the agent polls `gog gmail search 'newer_than:1m'` on a timer
-- Simpler, works today with Phase 1, but higher latency and API quota cost
+pub struct WebhookReceiver {
+    /// Port to listen on (e.g., 8790)
+    listen_port: u16,
+    /// Shared secret for validating incoming webhooks
+    hook_token: String,
+    /// Response filters from the tool's policy config
+    filters: Vec<Box<dyn ResponseFilter>>,
+    /// Channel to push SseEvents to connected agents
+    sse_tx: mpsc::UnboundedSender<Message>,
+}
+```
+
+### 5b. Configuration
+
+Extend the policy config to support webhook-triggered tools:
+
+```yaml
+tools:
+  gog-gmail-watch:
+    type: webhook                        # NEW tool type
+    hook_token: "your-shared-secret"
+    listen_port: 8790                    # Where carapace-server listens for webhooks
+
+    response_filters:                    # Same filter framework from Phase 2
+      - filter_type: content_deny
+        fields:
+          - field: "messages[*].subject"
+            deny_patterns:
+              - "*password reset*"
+              - "*verification code*"
+        action: omit
+
+    audit:
+      enabled: true
+      log_body: false                    # Email content is sensitive
+```
+
+Then `gog gmail watch serve` points at Carapace:
+
+```bash
+gog gmail watch serve \
+  --hook-url http://127.0.0.1:8790/hooks/gog-gmail-watch \
+  --hook-token "your-shared-secret" \
+  --include-body \
+  --max-bytes 20000
+```
+
+### 5c. Event flow through Carapace
+
+1. `gog gmail watch serve` receives Pub/Sub notification, enriches it with Gmail History API
+2. Posts enriched JSON to `http://127.0.0.1:8790/hooks/gog-gmail-watch`
+3. Carapace validates the hook token
+4. Carapace runs the payload through `response_filters` (content deny, field redact, etc.)
+5. If the payload survives filtering, wraps it as an `SseEvent`:
+   ```rust
+   SseEvent {
+       id: generate_event_id(),
+       tool: "gog-gmail-watch".to_string(),
+       event: "gmail_notification".to_string(),
+       data: filtered_payload_json,
+   }
+   ```
+6. Pushes SseEvent through existing `sse_event_tx` channel to connected agents
+7. Agent receives SseEvent, forwards to OpenClaw's hooks endpoint
+
+### 5d. Agent-side webhook forwarding
+
+The agent needs a small addition: when it receives an SseEvent for a webhook tool, it
+forwards the event data as an HTTP POST to a configured local endpoint (OpenClaw's
+`http://127.0.0.1:18789/hooks/gmail`).
+
+```yaml
+# Agent config (on untrusted VM)
+webhook_forwarding:
+  gog-gmail-watch:
+    target_url: "http://127.0.0.1:18789/hooks/gmail"
+    target_token: "OPENCLAW_HOOK_TOKEN"
+```
+
+### 5e. Why not just point `gog watch serve` directly at OpenClaw?
+
+If the trusted host runs `gog gmail watch serve --hook-url http://VM:18789/hooks/gmail`,
+the notifications bypass Carapace entirely. No content filtering, no audit logging, and
+the webhook token gets shared across the trust boundary. Running it through Carapace
+means:
+- Content filters block password reset emails before they reach the agent
+- All notifications are audit logged
+- The hook token stays on the trusted host
+- Credentials (OAuth tokens) stay on the trusted host
+
+### 5f. Fallback: Agent-side polling
+
+For simpler deployments that don't need real-time push, the agent can poll via Phase 1's
+CLI flow:
+
+```bash
+# Cron-style polling every 5 minutes (uses existing Phase 1 infrastructure)
+gog gmail search 'newer_than:5m' --max 20
+```
+
+Higher latency, higher API quota cost, but works without the webhook infrastructure.
+
+### 5g. Changes required
+
+New code:
+- [ ] `carapace-server/src/webhook_receiver.rs` -- HTTP webhook listener
+- [ ] `carapace-policy/src/config.rs` -- Add `WebhookPolicy` variant to `ToolPolicy` enum
+- [ ] `carapace-agent/src/webhook_forwarder.rs` -- Forward SseEvents as webhooks
+- [ ] `carapace-agent/src/config.rs` -- Add `webhook_forwarding` config
+
+Modified code:
+- [ ] `carapace-server/src/main.rs` -- Start webhook receiver alongside TCP listener
+- [ ] `carapace-server/src/listener.rs` -- Accept SseEvents from webhook receiver
+
+Deliverables:
+- [ ] Webhook receiver with token validation
+- [ ] Response filter integration for webhook payloads
+- [ ] Agent-side webhook forwarding
+- [ ] Integration test: webhook -> filter -> SseEvent -> agent -> forwarded POST
+- [ ] Example config for Gmail Watch through Carapace
+
+---
 
 ## Implementation Order
 
@@ -516,9 +695,9 @@ Options (not for now, but worth noting architecturally):
 | 2     | Medium | None         | ResponseFilter trait, 3 built-in filters, dispatch integration |
 | 3     | Small  | Phase 2      | Gmail-specific filter config, tests with sample JSON |
 | 4     | Small  | Phase 2      | Updated Signal/1Password example policies with filters |
-| 5     | Large  | Phase 1+2    | Gmail watch architecture (future) |
+| 5     | Medium | Phase 2      | Webhook receiver, agent forwarding, Gmail Watch pipeline |
 
-Phase 1 and Phase 2 can be developed in parallel -- Phase 1 is pure policy config, Phase 2 is the code change.
+Phase 1 and Phase 2 can be developed in parallel -- Phase 1 is pure policy config, Phase 2 is the code change. Phase 5 should follow Phase 2 closely, since the Pub/Sub pipeline is the primary way OpenClaw uses Gmail (not ad-hoc CLI queries).
 
 ## Key Design Decisions
 
@@ -555,3 +734,11 @@ Email subjects are mixed case. "Reset Your Password", "RESET YOUR PASSWORD", and
 3. **Filter bypass via encoding**: Could an attacker craft an email with encoded/obfuscated subject lines that bypass glob patterns? E.g., Unicode homoglyphs, base64-encoded subjects. May need normalization before matching.
 
 4. **Attachment handling**: `gog gmail thread get --download` saves files to disk. Carapace currently returns stdout/stderr but doesn't intercept filesystem writes. Need to either block `--download` via argv deny, or add a post-execution file scanning filter.
+
+5. **Webhook receiver and the `type: webhook` policy**: Adding a third `ToolPolicy` variant (alongside `cli` and `http`) is the cleanest design, but it touches the core policy enum. Alternative: model it as a special case of `type: http` with an `inbound: true` flag. The dedicated variant is clearer but has more blast radius.
+
+6. **OpenClaw's Gmail Watch auth token in URL bug**: [Issue #11024](https://github.com/openclaw/openclaw/issues/11024) documents a CVSS 8.3 vulnerability where OpenClaw embeds the push endpoint auth token in the URL query string. Carapace's webhook receiver should validate the token via a header (`X-Hook-Token` or `Authorization`), not a query parameter. Worth noting in docs.
+
+7. **Prompt injection via email content**: Malicious emails can contain text designed to manipulate the AI agent (e.g., "IGNORE ALL PREVIOUS INSTRUCTIONS"). This is orthogonal to content filtering (which blocks sensitive data, not adversarial prompts) but is a real attack vector. OpenClaw has `allowUnsafeExternalContent` (default: false) which wraps external content with safety guards. Carapace could add a `prompt_injection_guard` filter type that wraps email content in safety delimiters, but this is a deeper topic for later.
+
+8. **Streaming pull alternative**: A community-developed approach uses Pub/Sub streaming pull via gRPC instead of push webhooks -- the client opens an outbound connection and Google sends messages through it. This eliminates the need for inbound ports (no Tailscale Funnel). Could be a simpler deployment model for Phase 5 but requires a custom gRPC client rather than using `gog gmail watch serve`.
