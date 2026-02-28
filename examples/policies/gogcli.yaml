@@ -1,0 +1,48 @@
+tools:
+  gog:
+    type: cli
+    binary: /usr/local/bin/gog
+
+    # Policy is deny-by-default: commands only run if an allow pattern matches.
+    # The deny list below is a safety belt for extra protection.
+    argv_allow_patterns:
+      # Calendar operations (read + write)
+      - "calendar"
+      - "calendar events *"
+      - "calendar list*"
+      - "calendar create *"
+      - "calendar update *"
+      - "calendar colors"
+      # Help
+      - "--help"
+      - "help"
+      - "calendar --help"
+      - "calendar help"
+      - "calendar events --help"
+      # Basic health/auth checks
+      - "--version"
+      - "auth list"
+      - "auth status"
+      - "auth services"
+
+    argv_deny_patterns:
+      # Safety belt: explicitly block destructive calendar operations
+      - "calendar delete *"
+      # Safety belt: block auth management
+      - "auth add *"
+      - "auth remove *"
+      - "auth credentials *"
+      - "auth tokens *"
+      - "auth service-account *"
+
+    env_inject:
+      HOME: "/home/<your-username>"
+      GOG_KEYRING_BACKEND: "file"
+      GOG_KEYRING_PASSWORD: "<your-keyring-password>"
+      GOG_ACCOUNT: "<your-google-account>"
+
+    timeout_secs: 30
+
+    audit:
+      enabled: true
+      log_argv: true

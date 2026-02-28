@@ -38,8 +38,9 @@ fn env_u64(name: &str, default: u64) -> u64 {
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    // Initialize tracing
+    // Initialize tracing (no ANSI colors — output goes to journald/syslog)
     tracing_subscriber::fmt()
+        .with_ansi(false)
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
                 .add_directive(tracing::Level::INFO.into()),
@@ -182,6 +183,8 @@ async fn main() -> Result<()> {
                         }
                         Err(e) => {
                             tracing::error!("Failed to accept connection: {}", e);
+                            // Backoff to prevent tight error loops (e.g. FD exhaustion)
+                            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                         }
                     }
                 }

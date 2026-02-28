@@ -4,8 +4,9 @@ use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> AgentResult<()> {
-    // Initialize tracing
+    // Initialize tracing (no ANSI colors — output goes to journald/syslog)
     tracing_subscriber::fmt()
+        .with_ansi(false)
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
                 .add_directive(tracing::Level::INFO.into()),
